@@ -8,7 +8,7 @@ Repository: https://github.com/prakersh/codexmultiauth
 
 ## Why `cma`
 
-If you run multiple Codex accounts, the pain is usually not setup — it is repeated switching after a usage window is consumed. Manual logout/login loops and auth-file handling are slow, error-prone, and distracting.
+If you run multiple Codex accounts, the pain is usually not setup - it is repeated switching after a usage window is consumed. Manual logout/login loops and auth-file handling are slow, error-prone, and distracting.
 
 `cma` solves that with:
 
@@ -83,7 +83,7 @@ go build -o cma .
 ./cma tui
 ```
 
-## `app.sh` — Single Entrypoint for Contributors
+## `app.sh` - Single Entrypoint for Contributors
 
 Use `./app.sh` as the standard project workflow entrypoint for building, testing, verification, and release artifacts.
 

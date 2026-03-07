@@ -1,11 +1,11 @@
-# CodexMultiAuth (CMA) — Comprehensive Implementation Plan (v2)
+# CodexMultiAuth (CMA) - Comprehensive Implementation Plan (v2)
 
 > Planning-only document. **Do not implement in this phase.**
 > This document is for the executor agent to implement.
 
 ## 0) Decision updates from product/architecture review
 
-1. **Yes — `cma activate` is mandatory.**
+1. **Yes - `cma activate` is mandatory.**
    - It is the safe, explicit command that writes the selected account auth into `~/.codex/auth.json` so Codex uses it.
 2. **Library-first policy is mandatory.**
    - Use mature Go libraries where they fit.

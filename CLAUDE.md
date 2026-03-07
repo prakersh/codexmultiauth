@@ -8,3 +8,4 @@
 - Vault and backup encryption uses Argon2id + XChaCha20-Poly1305 with versioned metadata.
 - Support keyring-backed vault keys with file-key fallback when keyring is disabled or unavailable.
 - Keep CLI/TUI command behavior aligned with implemented selectors, conflict policies, and usage confidence tiers.
+- In project documentation and user-facing text, only use symbols available on a standard human keyboard. Avoid special typography symbols (for example: em dash, en dash, curly quotes).
