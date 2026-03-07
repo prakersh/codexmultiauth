@@ -144,6 +144,12 @@ echo "test: run arg forwarding"
 run_with_env "${APP_SH}" --run -- version >/dev/null
 assert_file_contains "${LOG_FILE}" "BIN_RUN version"
 
+echo "test: run defaults to help without args"
+: > "${LOG_FILE}"
+: > "${TRACE_FILE}"
+run_with_env "${APP_SH}" --run >/dev/null
+assert_file_contains "${LOG_FILE}" "BIN_RUN --help"
+
 echo "test: verify command path"
 : > "${LOG_FILE}"
 : > "${TRACE_FILE}"

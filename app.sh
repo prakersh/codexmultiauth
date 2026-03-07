@@ -400,5 +400,9 @@ if [[ "${DO_RELEASE}" == "true" ]]; then
     do_release
 fi
 if [[ "${DO_RUN}" == "true" ]]; then
-    do_run "${RUN_ARGS[@]}"
+    if [[ "${#RUN_ARGS[@]}" -gt 0 ]]; then
+        do_run "${RUN_ARGS[@]}"
+    else
+        do_run
+    fi
 fi
