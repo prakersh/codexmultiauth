@@ -2,6 +2,8 @@
 
 CodexMultiAuth manages multiple Codex accounts from one CLI/TUI. It saves Codex auth credentials in an encrypted vault, switches active accounts safely, and supports encrypted backup and restore.
 
+Repository: https://github.com/prakersh/codexmultiauth
+
 ## Project Purpose
 
 - Manage multiple Codex identities in one place.
@@ -42,12 +44,16 @@ go build -o cma .
 
 # 6) Launch TUI
 ./cma tui
+
+# 7) Show version and public links
+./cma version
 ```
 
 ## Command Overview
 
 - `cma list`
 - `cma usage <selector|all>`
+- `cma version [--short]`
 - `cma save`
 - `cma new [--device-auth]`
 - `cma activate <selector>`
@@ -57,6 +63,23 @@ go build -o cma .
 - `cma tui`
 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for full syntax and examples.
+
+## Versioning Process
+
+- Source of default version: `cmd/VERSION`.
+- `cma version --short` prints only the resolved version.
+- Build-time override is supported through ldflags.
+
+Example build with explicit version, commit, and date:
+
+```bash
+VERSION=$(cat cmd/VERSION)
+COMMIT=$(git rev-parse --short HEAD)
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+go build -ldflags "-X github.com/prakersh/codexmultiauth/cmd.Version=${VERSION} -X github.com/prakersh/codexmultiauth/cmd.Commit=${COMMIT} -X github.com/prakersh/codexmultiauth/cmd.Date=${DATE}" -o cma .
+```
+
+For tagged releases, set `cmd/VERSION` to the release version before build/tag.
 
 ## Security Model Summary
 
@@ -79,3 +102,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for details.
 - restore flow with inspect, selective/all toggle, and conflict policy handling
 
 See [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) for restore behavior.
+
+## Support
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/prakersh)

@@ -51,6 +51,32 @@ cma usage all
 cma usage work
 ```
 
+### `cma version [--short]`
+
+Show version and public project links.
+
+Flags:
+
+- `--short` print version string only
+
+```bash
+cma version
+cma version --short
+```
+
+Default output:
+
+```text
+cma version: <version>
+repository: https://github.com/prakersh/codexmultiauth
+support: https://buymeacoffee.com/prakersh
+```
+
+Version source behavior:
+
+- default value comes from `cmd/VERSION`
+- build can override with ldflags (`cmd.Version`, `cmd.Commit`, `cmd.Date`)
+
 ### `cma save`
 
 Save current Codex auth into encrypted vault.
