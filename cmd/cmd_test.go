@@ -306,6 +306,28 @@ func TestCommandErrorsPropagate(t *testing.T) {
 	require.Contains(t, err.Error(), "boom")
 }
 
+func TestVersionCommand_DefaultOutput(t *testing.T) {
+	originalVersion := Version
+	defer func() { Version = originalVersion }()
+	Version = "v9.9.9"
+
+	output, err := runCommand(newRootCmd(), "version")
+	require.NoError(t, err)
+	require.Contains(t, output, "cma version: v9.9.9")
+	require.Contains(t, output, "repository: https://github.com/prakersh/codexmultiauth")
+	require.Contains(t, output, "support: https://buymeacoffee.com/prakersh")
+}
+
+func TestVersionCommand_ShortOutput(t *testing.T) {
+	originalVersion := Version
+	defer func() { Version = originalVersion }()
+	Version = "v1.2.3"
+
+	output, err := runCommand(newRootCmd(), "version", "--short")
+	require.NoError(t, err)
+	require.Equal(t, "v1.2.3\n", output)
+}
+
 func runCommand(cmd *cobra.Command, args ...string) (string, error) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
