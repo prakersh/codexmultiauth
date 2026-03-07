@@ -1,0 +1,32 @@
+package cmd
+
+import "github.com/spf13/cobra"
+
+var rootCmdFactory = newRootCmd
+
+func Execute() error {
+	return rootCmdFactory().Execute()
+}
+
+func newRootCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "cma",
+		Short:         "Manage multiple Codex accounts safely",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+
+	cmd.AddCommand(
+		newListCmd(),
+		newUsageCmd(),
+		newSaveCmd(),
+		newNewCmd(),
+		newActivateCmd(),
+		newDeleteCmd(),
+		newBackupCmd(),
+		newRestoreCmd(),
+		newTUICmd(),
+	)
+
+	return cmd
+}
