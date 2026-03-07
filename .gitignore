@@ -47,6 +47,8 @@ secrets/
 tmp/
 temp/
 .tmp/
+bin/
+dist/
 
 # Editor/IDE
 # .idea/
