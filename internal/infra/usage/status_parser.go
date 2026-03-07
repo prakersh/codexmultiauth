@@ -10,10 +10,10 @@ import (
 )
 
 type response struct {
-	PlanType            string     `json:"plan_type"`
-	RateLimit           rateLimit  `json:"rate_limit"`
-	CodeReviewRateLimit rateLimit  `json:"code_review_rate_limit,omitempty"`
-	Credits             *credits   `json:"credits,omitempty"`
+	PlanType            string    `json:"plan_type"`
+	RateLimit           rateLimit `json:"rate_limit"`
+	CodeReviewRateLimit rateLimit `json:"code_review_rate_limit,omitempty"`
+	Credits             *credits  `json:"credits,omitempty"`
 }
 
 type rateLimit struct {

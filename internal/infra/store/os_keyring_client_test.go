@@ -9,9 +9,9 @@ import (
 )
 
 type fakeNativeKeyring struct {
-	item     keyring.Item
-	getErr   error
-	setErr   error
+	item      keyring.Item
+	getErr    error
+	setErr    error
 	removeErr error
 }
 
@@ -22,7 +22,9 @@ func (f *fakeNativeKeyring) Get(key string) (keyring.Item, error) {
 	return f.item, nil
 }
 
-func (f *fakeNativeKeyring) GetMetadata(key string) (keyring.Metadata, error) { return keyring.Metadata{}, nil }
+func (f *fakeNativeKeyring) GetMetadata(key string) (keyring.Metadata, error) {
+	return keyring.Metadata{}, nil
+}
 func (f *fakeNativeKeyring) Set(item keyring.Item) error {
 	if f.setErr != nil {
 		return f.setErr

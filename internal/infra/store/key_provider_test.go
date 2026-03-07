@@ -2,8 +2,8 @@ package store_test
 
 import (
 	"context"
-	"os"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -16,10 +16,10 @@ import (
 )
 
 type fakeKeyring struct {
-	values  map[string][]byte
-	getErr  error
-	setErr  error
-	delErr  error
+	values map[string][]byte
+	getErr error
+	setErr error
+	delErr error
 }
 
 func (f *fakeKeyring) key(service, account string) string {

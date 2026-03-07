@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/prakersh/codexmultiauth/internal/app"
@@ -27,18 +27,18 @@ const (
 )
 
 type model struct {
-	service        Service
-	accounts       []app.ListedAccount
-	usage          []app.UsageResult
-	selected       int
-	message        string
-	input          textinput.Model
-	mode           mode
-	pendingName    string
-	pendingRestore string
-	pendingPass    []byte
-	width          int
-	height         int
+	service               Service
+	accounts              []app.ListedAccount
+	usage                 []app.UsageResult
+	selected              int
+	message               string
+	input                 textinput.Model
+	mode                  mode
+	pendingName           string
+	pendingRestore        string
+	pendingPass           []byte
+	width                 int
+	height                int
 	restoreCandidates     []app.RestoreCandidate
 	restoreSelected       map[string]bool
 	restoreCursor         int
@@ -72,8 +72,8 @@ type usageMsg struct {
 }
 
 type actionMsg struct {
-	message string
-	err     error
+	message      string
+	err          error
 	clearRestore bool
 }
 

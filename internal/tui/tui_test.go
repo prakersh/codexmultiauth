@@ -14,20 +14,20 @@ import (
 )
 
 type fakeService struct {
-	accounts       []app.ListedAccount
-	usage          []app.UsageResult
-	inspectArtifact backup.Plaintext
+	accounts          []app.ListedAccount
+	usage             []app.UsageResult
+	inspectArtifact   backup.Plaintext
 	inspectCandidates []app.RestoreCandidate
-	inspectErr     error
-	restoreSummary app.RestoreSummary
-	restoreErr     error
-	saveResult     app.SaveResult
-	saveErr        error
-	activateResult domain.Account
-	activateErr    error
-	deleteErr      error
-	backupPath     string
-	backupErr      error
+	inspectErr        error
+	restoreSummary    app.RestoreSummary
+	restoreErr        error
+	saveResult        app.SaveResult
+	saveErr           error
+	activateResult    domain.Account
+	activateErr       error
+	deleteErr         error
+	backupPath        string
+	backupErr         error
 
 	lastUsageSelector string
 	lastBackupInput   app.BackupInput

@@ -28,8 +28,8 @@ type Vault struct {
 }
 
 type vaultFile struct {
-	Version string            `json:"version"`
-	Entries []vaultFileEntry  `json:"entries"`
+	Version string           `json:"version"`
+	Entries []vaultFileEntry `json:"entries"`
 }
 
 type vaultFileEntry struct {

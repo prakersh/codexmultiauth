@@ -15,7 +15,7 @@ type SaveInput struct {
 }
 
 type SaveResult struct {
-	Account    domain.Account
+	Account      domain.Account
 	Deduplicated bool
 }
 
