@@ -1,5 +1,19 @@
 # Command Reference
 
+## Project Entrypoint
+
+Use `./app.sh` for local build, test, verification, and release workflows.  
+Use `cma` commands for account operations.
+
+Common orchestration examples:
+
+```bash
+./app.sh --smoke
+./app.sh --verify
+./app.sh --build
+./app.sh --run -- version
+```
+
 ## Root
 
 ```bash

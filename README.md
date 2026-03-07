@@ -24,6 +24,30 @@ go build -o cma .
 ./cma --help
 ```
 
+## `app.sh` Workflow (Canonical Entrypoint)
+
+Use `./app.sh` for contributor and maintainer workflows:
+
+```bash
+# quick smoke checks
+./app.sh --smoke
+
+# full verification matrix
+./app.sh --verify
+
+# build binary at ./bin/cma with ldflags metadata
+./app.sh --build
+
+# run CLI through orchestrator
+./app.sh --run -- version
+./app.sh --run -- tui
+
+# release binaries to ./dist (darwin/linux, amd64/arm64)
+./app.sh --release
+```
+
+`app.sh` reads the default app version from `cmd/VERSION` and injects build metadata (`cmd.Version`, `cmd.Commit`, `cmd.Date`) via ldflags.
+
 ## Quick Start
 
 ```bash

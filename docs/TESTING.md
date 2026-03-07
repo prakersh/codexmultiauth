@@ -1,5 +1,17 @@
 # Testing and Verification
 
+## Canonical Workflow
+
+`./app.sh` is the project entrypoint for checks:
+
+```bash
+./app.sh --test          # go test ./... -count=1
+./app.sh --race          # go test -race ./... -count=1
+./app.sh --cover         # coverage commands + gate status
+./app.sh --verify        # full matrix (tests, race, coverage, cross-builds)
+./app.sh --smoke         # vet + build + short tests
+```
+
 ## Core Test Commands
 
 ```bash
@@ -37,6 +49,8 @@ GOOS=darwin GOARCH=amd64 go build ./...
 GOOS=linux GOARCH=amd64 go build ./...
 GOOS=linux GOARCH=arm64 go build ./...
 ```
+
+These commands are executed by `./app.sh --verify`.
 
 ## Test Areas Covered
 
