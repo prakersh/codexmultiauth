@@ -27,6 +27,27 @@ go.work.sum
 # env file
 .env
 
+# CMA local runtime artifacts
+*.cma.bak
+backups/
+vault.v1.json
+vault.key.v1
+state.json
+locks/
+auth.json
+
+# Common secret and local config files
+.codex/
+.config/
+secrets/
+*.pem
+*.key
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
 # Editor/IDE
 # .idea/
 # .vscode/
