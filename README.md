@@ -1,77 +1,113 @@
 # CodexMultiAuth (`cma`)
 
-CodexMultiAuth manages multiple Codex accounts from one CLI/TUI. It saves Codex auth credentials in an encrypted vault, switches active accounts safely, and supports encrypted backup and restore.
+**The fastest way to switch Codex accounts when limits hit.**
+
+Codex is effectively single-active-auth on a local machine. When one account hits its 5-hour usage window, many users end up in repeated logout/login cycles across accounts. `cma` removes that overhead with safe account switching, encrypted storage, and encrypted backup/restore.
 
 Repository: https://github.com/prakersh/codexmultiauth
 
-## Project Purpose
+## Why `cma`
 
-- Manage multiple Codex identities in one place.
-- Keep saved credentials encrypted at rest.
-- Provide atomic and rollback-safe account mutation flows.
-- Offer both CLI commands and a terminal UI.
+If you run multiple Codex accounts, the pain is usually not setup — it is repeated switching after a usage window is consumed. Manual logout/login loops and auth-file handling are slow, error-prone, and distracting.
+
+`cma` solves that with:
+
+- encrypted credential storage at rest
+- atomic account activation with rollback
+- encrypted backups and guided restore
+- confidence-tiered usage reporting
+- both CLI and TUI workflows
+
+## Who This Is For
+
+`cma` is built for users who need fast account rotation with less overhead:
+
+- **power Codex users** juggling multiple accounts to avoid repeated auth friction
+- **consultants and agencies** switching between client identities during tight delivery windows
+- **teams with strict security posture** that want fewer manual auth-file mistakes
+
+## Core Capabilities
+
+- Save current Codex auth into an encrypted vault: `cma save`
+- Switch active account safely: `cma activate <selector>`
+- Create encrypted backups: `cma backup <encrypthash/pass> <name|abspath>`
+- Restore selectively or all-at-once: `cma restore ... [--all]`
+- View account usage with confidence labels: `cma usage <selector|all>`
+- Run interactive terminal UI: `cma tui`
+- Print release info and links: `cma version`
 
 ## Requirements
 
-- Go `1.24.2` (from `go.mod`)
-- A working `codex` CLI on `PATH` for `cma new`
-- Optional OS keyring support (CMA falls back to a local key file when keyring is disabled or unavailable)
+- Go `1.24.2`
+- `codex` CLI on `PATH` (required for `cma new` login flow)
+- Optional OS keyring support (CMA falls back to file key storage when needed)
 
-## Build and Install
+## Quick Start
+
+### 1) Build
 
 ```bash
 go build -o cma .
 ./cma --help
 ```
 
-## `app.sh` Workflow (Canonical Entrypoint)
-
-Use `./app.sh` for contributor and maintainer workflows:
+### 2) Save and switch accounts
 
 ```bash
-# quick smoke checks
+# Save current Codex account (encrypted)
+./cma save
+
+# List saved accounts
+./cma list
+
+# Activate an account by selector
+./cma activate 1
+```
+
+### 3) Backup and restore
+
+```bash
+# Encrypted backup (interactive passphrase prompt)
+./cma backup prompt weekly-backup
+
+# Restore with interactive selection
+./cma restore prompt weekly-backup
+
+# Restore all entries atomically with conflict policy
+./cma restore prompt weekly-backup --all --conflict overwrite
+```
+
+### 4) Launch the TUI
+
+```bash
+./cma tui
+```
+
+## `app.sh` — Single Entrypoint for Contributors
+
+Use `./app.sh` as the standard project workflow entrypoint for building, testing, verification, and release artifacts.
+
+```bash
+# Quick pre-commit checks
 ./app.sh --smoke
 
-# full verification matrix
+# Full verification matrix
 ./app.sh --verify
 
-# build binary at ./bin/cma with ldflags metadata
+# Build local binary (./bin/cma)
 ./app.sh --build
 
-# run CLI through orchestrator
+# Run cma through orchestrator
 ./app.sh --run -- version
 ./app.sh --run -- tui
 
-# release binaries to ./dist (darwin/linux, amd64/arm64)
+# Cross-platform release artifacts (./dist)
 ./app.sh --release
 ```
 
-`app.sh` reads the default app version from `cmd/VERSION` and injects build metadata (`cmd.Version`, `cmd.Commit`, `cmd.Date`) via ldflags.
+Execution order for combined flags:
 
-## Quick Start
-
-```bash
-# 1) Save current Codex auth
-./cma save
-
-# 2) List saved accounts
-./cma list
-
-# 3) Activate one account by selector
-./cma activate 1
-
-# 4) Create encrypted backup (interactive passphrase prompt)
-./cma backup prompt my-snapshot
-
-# 5) Restore from backup (interactive selection by default)
-./cma restore prompt my-snapshot
-
-# 6) Launch TUI
-./cma tui
-
-# 7) Show version and public links
-./cma version
-```
+`deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> release -> run`
 
 ## Command Overview
 
@@ -86,15 +122,24 @@ Use `./app.sh` for contributor and maintainer workflows:
 - `cma restore <encrypthash/pass> <pathtobackup|name> [--all] [--conflict ask|overwrite|skip|rename] [--allow-plain-pass-arg]`
 - `cma tui`
 
-See [docs/COMMANDS.md](docs/COMMANDS.md) for full syntax and examples.
+Full syntax and examples: [docs/COMMANDS.md](docs/COMMANDS.md)
 
-## Versioning Process
+## Versioning
 
-- Source of default version: `cmd/VERSION`.
-- `cma version --short` prints only the resolved version.
-- Build-time override is supported through ldflags.
+`cma version` prints the app version, repository URL, and support URL.
 
-Example build with explicit version, commit, and date:
+```bash
+./cma version
+./cma version --short
+```
+
+Version resolution order:
+
+1. `cmd.Version` (build-time ldflags override)
+2. `cmd/VERSION`
+3. fallback `dev`
+
+Example release build metadata injection:
 
 ```bash
 VERSION=$(cat cmd/VERSION)
@@ -103,29 +148,35 @@ DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 go build -ldflags "-X github.com/prakersh/codexmultiauth/cmd.Version=${VERSION} -X github.com/prakersh/codexmultiauth/cmd.Commit=${COMMIT} -X github.com/prakersh/codexmultiauth/cmd.Date=${DATE}" -o cma .
 ```
 
-For tagged releases, set `cmd/VERSION` to the release version before build/tag.
+## Security Model at a Glance
 
-## Security Model Summary
+- Vault and backup encryption: `XChaCha20-Poly1305`
+- Backup key derivation: `Argon2id`
+- Strict filesystem permissions: files `0600`, dirs `0700`
+- Mutations use lock + atomic write + verification + rollback
+- Secrets are not printed in normal command output
 
-- CMA vault and backups are encrypted with `XChaCha20-Poly1305`.
-- Backup passphrases use `Argon2id` for key derivation.
-- Files are written with `0600`; directories with `0700`.
-- Mutating flows use lock + atomic write + verification + rollback.
-- Secrets are not printed in normal output.
+Details: [docs/SECURITY.md](docs/SECURITY.md)
 
-See [docs/SECURITY.md](docs/SECURITY.md) for details.
+## Usage Data Confidence
 
-## TUI Overview
+`cma usage` labels each result as:
 
-`cma tui` supports:
+- `confirmed`
+- `best_effort`
+- `unknown`
 
-- account list and active marker
-- usage refresh for selected account
-- save / activate / delete actions
-- backup flow (name + passphrase)
-- restore flow with inspect, selective/all toggle, and conflict policy handling
+This prevents false precision when no stable machine-readable quota source is available. It is especially useful for users trying to decide when to rotate to another account without guessing.
 
-See [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) for restore behavior.
+## Documentation Map
+
+- [docs/COMMANDS.md](docs/COMMANDS.md)
+- [docs/SECURITY.md](docs/SECURITY.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md)
+- [docs/TESTING.md](docs/TESTING.md)
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [docs/VERIFICATION.md](docs/VERIFICATION.md)
 
 ## Support
 
