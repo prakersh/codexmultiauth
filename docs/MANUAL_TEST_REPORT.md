@@ -130,11 +130,12 @@
 
 ## Manual Campaign Conclusion
 
-- All critical suites requested for release signoff are now covered in this report.
-- The previously blocked interactive and live-account cases are now closed with evidence.
+- All critical suites requested for release signoff are covered in this report.
+- The previously blocked interactive and live-account cases are closed with evidence.
 - Security-focused manual checks still pass:
   - no secret leakage detected in logs
   - encrypted artifacts do not expose plaintext token values
   - permissions match the documented policy
+- The final automated rerun also passed after this manual campaign.
 
-The manual campaign no longer blocks release. Final release status depends on the fresh automated verification rerun.
+The manual campaign does not block release.

@@ -20,11 +20,11 @@ The remediation sprint fixed the three open operator-facing issues:
 
 The previously blocked manual cases were re-run in isolated temp homes, with PTY-driven interaction where required. The live-account-dependent cases were also closed by cloning the current real Codex auth into an isolated environment and validating the post-activation status path there.
 
-At this phase, the prior release blockers are closed. Final release signoff depends on the fresh full verification matrix in the next phase.
+The prior release blockers are closed, and the fresh full verification matrix now passes as well.
 
 ## B) Automated Checks
 
-Baseline commands already executed and retained as evidence:
+Baseline commands retained from the earlier audit:
 
 - `./app.sh --deps --lint --test --race --cover`
   - Evidence: `docs/audit_artifacts/app_deps_lint_test_race_cover.log`
@@ -39,6 +39,29 @@ Tool availability:
   - Not run in this phase because `staticcheck` is not installed.
 - `gosec ./...`
   - Not run in this phase because `gosec` is not installed.
+
+Final rerun commands and evidence:
+
+- `go test ./... -count=1`
+  - Evidence: `docs/audit_artifacts/reverify_go_test.log`
+- `go test -race ./... -count=1`
+  - Evidence: `docs/audit_artifacts/reverify_go_test_race.log`
+- `go test ./... -covermode=atomic -coverprofile=coverage.out`
+  - Evidence: `docs/audit_artifacts/reverify_go_test_cover.log`
+- `go tool cover -func=coverage.out`
+  - Evidence: `docs/audit_artifacts/reverify_cover_func.log`
+- `go test ./internal/... -covermode=atomic -coverprofile=coverage_internal.out`
+  - Evidence: `docs/audit_artifacts/reverify_internal_cover.log`
+- `go tool cover -func=coverage_internal.out`
+  - Evidence: `docs/audit_artifacts/reverify_internal_cover_func.log`
+- `GOOS=darwin GOARCH=arm64 go build ./...`
+  - Evidence: `docs/audit_artifacts/reverify_build_darwin_arm64.log`
+- `GOOS=darwin GOARCH=amd64 go build ./...`
+  - Evidence: `docs/audit_artifacts/reverify_build_darwin_amd64.log`
+- `GOOS=linux GOARCH=amd64 go build ./...`
+  - Evidence: `docs/audit_artifacts/reverify_build_linux_amd64.log`
+- `GOOS=linux GOARCH=arm64 go build ./...`
+  - Evidence: `docs/audit_artifacts/reverify_build_linux_arm64.log`
 
 ## C) Findings Status
 
@@ -136,14 +159,23 @@ Previously blocked or partial critical cases now closed:
 
 ## F) Coverage and Build Gates
 
-Latest accepted baseline before the final rerun:
+Final rerun results:
 
-- Overall coverage: `85.4%`
-  - Evidence: `docs/audit_artifacts/verify_cover_func.log`
-- Internal coverage: `85.1%`
-  - Evidence: `docs/audit_artifacts/verify_internal_cover_func.log`
+- `go test ./... -count=1`: PASS
+- `go test -race ./... -count=1`: PASS
+  - Note: macOS linker emitted non-fatal `LC_DYSYMTAB` warnings during some race test links
+- `go test ./... -covermode=atomic -coverprofile=coverage.out`: PASS
+- `go test ./internal/... -covermode=atomic -coverprofile=coverage_internal.out`: PASS
+- cross-build matrix: PASS for `darwin/linux` x `amd64/arm64`
 
-Package baselines:
+Final coverage totals:
+
+- Overall coverage: `85.5%`
+  - Evidence: `docs/audit_artifacts/reverify_cover_func.log`
+- Internal coverage: `85.3%`
+  - Evidence: `docs/audit_artifacts/reverify_internal_cover_func.log`
+
+Final package coverage:
 
 - `internal/app`: `87.7%`
 - `internal/infra/crypto`: `93.4%`
@@ -152,7 +184,7 @@ Package baselines:
 - `internal/infra/usage`: `91.2%`
 - `internal/tui`: `80.4%`
 
-These gates remain above the required thresholds before the final rerun.
+These results remain above the required release gates.
 
 ## G) Open Risks
 
@@ -163,8 +195,14 @@ These gates remain above the required thresholds before the final rerun.
 
 No open P0 or P1 issues remain from the prior audit. No open P2 or P3 findings remain from the prior report either.
 
-## H) Interim Verdict
+## H) Final Verdict
 
-**Release blockers from the 2026-03-08 audit are closed.**
+**Go**
 
-The project moves from **No-Go** to **pending final verification**. If the fresh test, race, coverage, and cross-build matrix passes without regression, the release verdict can move to **Go**.
+Reason:
+
+- previously open findings are closed
+- previously blocked critical manual cases are closed with evidence
+- coverage gates remain satisfied
+- required test, race, coverage, and cross-build commands pass
+- no secret leakage was detected in command output, logs, or generated documentation reviewed in this audit
