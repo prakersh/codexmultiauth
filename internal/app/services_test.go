@@ -160,6 +160,61 @@ func TestSaveDeduplicatesAndDefaultDisplayName(t *testing.T) {
 	require.True(t, again.Deduplicated)
 }
 
+func TestList_UsesSingularDeterministicActiveMarker(t *testing.T) {
+	t.Run("prefers fingerprint match over divergent state active id", func(t *testing.T) {
+		manager, authStore, _ := newTestManager(t)
+		ctx := context.Background()
+
+		authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"token-1","refresh_token":"refresh-1","account_id":"acc-1"}}`), domain.AuthStoreFile)
+		savedA, err := manager.Save(ctx, SaveInput{DisplayName: "work"})
+		require.NoError(t, err)
+
+		authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"token-2","refresh_token":"refresh-2","account_id":"acc-2"}}`), domain.AuthStoreFile)
+		savedB, err := manager.Save(ctx, SaveInput{DisplayName: "personal"})
+		require.NoError(t, err)
+
+		state, err := manager.stateRepo.Load()
+		require.NoError(t, err)
+		state.ActiveAccountID = savedA.Account.ID
+		require.NoError(t, manager.stateRepo.Save(state))
+
+		authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"token-2","refresh_token":"refresh-2","account_id":"acc-2"}}`), domain.AuthStoreFile)
+
+		listed, err := manager.List(ctx)
+		require.NoError(t, err)
+		require.Len(t, listed, 2)
+		require.False(t, listed[0].IsActive)
+		require.True(t, listed[1].IsActive)
+		require.Equal(t, savedB.Account.ID, listed[1].Account.ID)
+	})
+
+	t.Run("falls back to state active id when auth fingerprint is unavailable", func(t *testing.T) {
+		manager, authStore, _ := newTestManager(t)
+		ctx := context.Background()
+
+		authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"token-1","refresh_token":"refresh-1","account_id":"acc-1"}}`), domain.AuthStoreFile)
+		savedA, err := manager.Save(ctx, SaveInput{DisplayName: "work"})
+		require.NoError(t, err)
+
+		authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"token-2","refresh_token":"refresh-2","account_id":"acc-2"}}`), domain.AuthStoreFile)
+		_, err = manager.Save(ctx, SaveInput{DisplayName: "personal"})
+		require.NoError(t, err)
+
+		state, err := manager.stateRepo.Load()
+		require.NoError(t, err)
+		state.ActiveAccountID = savedA.Account.ID
+		require.NoError(t, manager.stateRepo.Save(state))
+
+		authStore.exists = false
+
+		listed, err := manager.List(ctx)
+		require.NoError(t, err)
+		require.Len(t, listed, 2)
+		require.True(t, listed[0].IsActive)
+		require.False(t, listed[1].IsActive)
+	})
+}
+
 func TestNewRollsBackOnLoginFailure(t *testing.T) {
 	manager, authStore, _ := newTestManager(t)
 	ctx := context.Background()

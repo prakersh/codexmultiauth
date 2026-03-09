@@ -264,6 +264,39 @@ func TestCommandWorkflows(t *testing.T) {
 	require.Empty(t, output)
 }
 
+func TestNewCommand_DoesNotPromptForOptionalAliases(t *testing.T) {
+	originalService := newService
+	originalAskOne := askOne
+	defer func() {
+		newService = originalService
+		askOne = originalAskOne
+	}()
+
+	svc := &fakeService{
+		newResult: app.SaveResult{Account: domain.Account{DisplayName: "fresh"}},
+	}
+	newService = func() (service, error) { return svc, nil }
+	askOne = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
+		switch p := prompt.(type) {
+		case *survey.Input:
+			if p.Message == "Aliases (comma-separated, optional)" {
+				t.Fatalf("unexpected aliases prompt")
+			}
+			if p.Message == "Account name (optional)" {
+				out := response.(*string)
+				*out = "prompted"
+			}
+		}
+		return nil
+	}
+
+	output, err := runCommand(newNewCmd())
+	require.NoError(t, err)
+	require.Contains(t, output, "Saved fresh")
+	require.Equal(t, "prompted", svc.lastNewInput.DisplayName)
+	require.Empty(t, svc.lastNewInput.Aliases)
+}
+
 func TestDeleteActiveCancellationAndContainsHelper(t *testing.T) {
 	originalService := newService
 	originalAskOne := askOne

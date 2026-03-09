@@ -27,12 +27,6 @@ func newNewCmd() *cobra.Command {
 					return err
 				}
 			}
-			if aliases == "" {
-				aliases, err = promptText("Aliases (comma-separated, optional)", "")
-				if err != nil {
-					return err
-				}
-			}
 			result, err := manager.New(context.Background(), app.NewInput{
 				DisplayName: name,
 				Aliases:     splitAliases(aliases),

@@ -22,15 +22,37 @@ func (m *Manager) List(ctx context.Context) ([]ListedAccount, error) {
 		activeFingerprint = auth.Fingerprint
 	}
 
-	listed := make([]ListedAccount, 0, len(state.Accounts))
-	for _, account := range state.Accounts {
-		active := account.ID == state.ActiveAccountID
-		if activeFingerprint != "" && account.Fingerprint == activeFingerprint {
-			active = true
+	activeIndex := -1
+	if activeFingerprint != "" {
+		for index, account := range state.Accounts {
+			if account.Fingerprint == activeFingerprint && account.ID == state.ActiveAccountID {
+				activeIndex = index
+				break
+			}
 		}
+		if activeIndex == -1 {
+			for index, account := range state.Accounts {
+				if account.Fingerprint == activeFingerprint {
+					activeIndex = index
+					break
+				}
+			}
+		}
+	}
+	if activeIndex == -1 && state.ActiveAccountID != "" {
+		for index, account := range state.Accounts {
+			if account.ID == state.ActiveAccountID {
+				activeIndex = index
+				break
+			}
+		}
+	}
+
+	listed := make([]ListedAccount, 0, len(state.Accounts))
+	for index, account := range state.Accounts {
 		listed = append(listed, ListedAccount{
 			Account:  account,
-			IsActive: active,
+			IsActive: index == activeIndex,
 		})
 	}
 	return listed, nil
