@@ -6,8 +6,8 @@ import (
 
 	"github.com/prakersh/codexmultiauth/internal/app"
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,10 +54,7 @@ func TestBackupRestoreAllAtomicImport(t *testing.T) {
 	backupPath, err := manager.Backup(ctx, app.BackupInput{Passphrase: []byte("secret"), Target: "all-backup"})
 	require.NoError(t, err)
 
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 	configRepo := store.NewConfigRepo(p)
 	authStore2 := store.NewCodexAuthStore(p, nil, configRepo)
 	stateRepo := store.NewStateRepo(p)

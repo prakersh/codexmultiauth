@@ -11,8 +11,8 @@ import (
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,9 +37,7 @@ func TestNormalizeAndValidateAuth_Errors(t *testing.T) {
 }
 
 func TestCodexAuthStore_LoadPrefersFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	require.NoError(t, os.MkdirAll(p.CodexHome, cmafs.DirMode))
 	require.NoError(t, os.WriteFile(p.CodexAuth, authFixture(), cmafs.FileMode))
@@ -54,9 +52,7 @@ func TestCodexAuthStore_LoadPrefersFile(t *testing.T) {
 }
 
 func TestCodexAuthStore_LoadFallsBackToKeyring(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	ring := &fakeKeyring{values: map[string][]byte{
 		store.CodexAuthKeyringService + "|" + store.CodexAuthKeyringAccount: authFixture(),
@@ -68,9 +64,7 @@ func TestCodexAuthStore_LoadFallsBackToKeyring(t *testing.T) {
 }
 
 func TestCodexAuthStore_SaveWritesFileAndKeyringWhenEnabled(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	ring := &fakeKeyring{}
 	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
@@ -83,10 +77,7 @@ func TestCodexAuthStore_SaveWritesFileAndKeyringWhenEnabled(t *testing.T) {
 }
 
 func TestCodexAuthStore_SaveSkipsKeyringWhenDisabled(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "1").Paths
 
 	ring := &fakeKeyring{}
 	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
@@ -97,9 +88,7 @@ func TestCodexAuthStore_SaveSkipsKeyringWhenDisabled(t *testing.T) {
 }
 
 func TestCodexAuthStore_DeleteIgnoresMissingKeyring(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	ring := &fakeKeyring{delErr: keyring.ErrKeyNotFound}
 	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
@@ -108,9 +97,7 @@ func TestCodexAuthStore_DeleteIgnoresMissingKeyring(t *testing.T) {
 }
 
 func TestCodexAuthStore_ConfigAndErrorPaths(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	require.NoError(t, os.MkdirAll(p.CodexHome, cmafs.DirMode))
 	require.NoError(t, os.WriteFile(filepath.Join(p.CodexHome, "config.toml"), []byte("cli_auth_credentials_store = 'file'\n"), cmafs.FileMode))
@@ -119,7 +106,7 @@ func TestCodexAuthStore_ConfigAndErrorPaths(t *testing.T) {
 		store.CodexAuthKeyringService + "|" + store.CodexAuthKeyringAccount: authFixture(),
 	}}
 	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
-	_, err = authStore.Load(context.Background())
+	_, err := authStore.Load(context.Background())
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	require.NoError(t, os.WriteFile(filepath.Join(p.CodexHome, "config.toml"), []byte("cli_auth_credentials_store = 'keyring'\n"), cmafs.FileMode))
@@ -140,13 +127,11 @@ func TestCodexAuthStore_ConfigAndErrorPaths(t *testing.T) {
 }
 
 func TestCodexAuthStore_SaveDeleteErrors(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	ring := &fakeKeyring{setErr: errors.New("boom")}
 	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
-	err = authStore.Save(context.Background(), authFixture())
+	err := authStore.Save(context.Background(), authFixture())
 	require.Error(t, err)
 
 	require.NoError(t, os.RemoveAll(p.CodexHome))

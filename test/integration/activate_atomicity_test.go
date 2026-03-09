@@ -10,8 +10,8 @@ import (
 	"github.com/prakersh/codexmultiauth/internal/app"
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,10 +32,7 @@ func (r *failingStateRepo) Save(state domain.State) error {
 }
 
 func TestActivate_RollsBackAuthOnStateFailure(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 
 	configRepo := store.NewConfigRepo(p)
 	authStore := store.NewCodexAuthStore(p, nil, configRepo)

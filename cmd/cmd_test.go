@@ -10,6 +10,7 @@ import (
 	"github.com/prakersh/codexmultiauth/internal/app"
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	"github.com/prakersh/codexmultiauth/internal/infra/backup"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -114,8 +115,7 @@ func TestPromptHelpersAndSplitAliases(t *testing.T) {
 }
 
 func TestNewManagerAndExecute(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
+	testenv.New(t)
 
 	manager, err := newManager()
 	require.NoError(t, err)

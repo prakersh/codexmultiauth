@@ -10,8 +10,8 @@ import (
 	"github.com/99designs/keyring"
 
 	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,9 +57,7 @@ func (f *fakeKeyring) Delete(service, account string) error {
 }
 
 func TestVaultKeyManager_UsesKeyringWhenAvailable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	ring := &fakeKeyring{}
 	manager := store.NewVaultKeyManager(p, store.NewConfigRepo(p), ring)
@@ -76,10 +74,7 @@ func TestVaultKeyManager_UsesKeyringWhenAvailable(t *testing.T) {
 }
 
 func TestVaultKeyManager_UsesFileWhenKeyringDisabledByEnv(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "1").Paths
 
 	manager := store.NewVaultKeyManager(p, store.NewConfigRepo(p), &fakeKeyring{})
 
@@ -90,9 +85,7 @@ func TestVaultKeyManager_UsesFileWhenKeyringDisabledByEnv(t *testing.T) {
 }
 
 func TestVaultKeyManager_FallsBackToFileOnKeyringFailure(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	manager := store.NewVaultKeyManager(p, store.NewConfigRepo(p), &fakeKeyring{getErr: errors.New("keyring down")})
 
@@ -103,9 +96,7 @@ func TestVaultKeyManager_FallsBackToFileOnKeyringFailure(t *testing.T) {
 }
 
 func TestVaultKeyManager_InvalidStoredKeyFallsBackToFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	ring := &fakeKeyring{values: map[string][]byte{
 		store.CMAVaultKeyringService + "|" + store.CMAVaultKeyringAccount: []byte("short"),
@@ -119,14 +110,12 @@ func TestVaultKeyManager_InvalidStoredKeyFallsBackToFile(t *testing.T) {
 }
 
 func TestVaultKeyManager_FileCorruptionAndSetFailure(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	manager := store.NewVaultKeyManager(p, store.NewConfigRepo(p), nil)
 	require.NoError(t, os.MkdirAll(filepath.Dir(p.VaultKeyFile), 0o700))
 	require.NoError(t, os.WriteFile(p.VaultKeyFile, []byte("{bad"), 0o600))
-	_, _, err = manager.LoadOrCreate(context.Background())
+	_, _, err := manager.LoadOrCreate(context.Background())
 	require.Error(t, err)
 
 	require.NoError(t, os.Remove(p.VaultKeyFile))
@@ -134,4 +123,14 @@ func TestVaultKeyManager_FileCorruptionAndSetFailure(t *testing.T) {
 	_, kind, err := manager.LoadOrCreate(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, store.VaultKeyProviderFile, kind)
+}
+
+func TestVaultKeyManager_IsDeterministicWhenExternalDisableKeyringIsPreset(t *testing.T) {
+	t.Setenv("CMA_DISABLE_KEYRING", "1")
+	p := testenv.NewWithDisableKeyring(t, "").Paths
+
+	manager := store.NewVaultKeyManager(p, store.NewConfigRepo(p), &fakeKeyring{})
+	_, kind, err := manager.LoadOrCreate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, store.VaultKeyProviderKeyring, kind)
 }

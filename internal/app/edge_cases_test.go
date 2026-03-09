@@ -11,6 +11,7 @@ import (
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
 	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,10 +152,7 @@ func TestNewErrorBranches(t *testing.T) {
 	})
 
 	t.Run("restores original auth when saving new auth fails", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		t.Setenv("CMA_DISABLE_KEYRING", "1")
-		p, err := paths.Resolve()
-		require.NoError(t, err)
+		p := testenv.New(t).Paths
 		configRepo := store.NewConfigRepo(p)
 		currentRaw := []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"old","refresh_token":"refresh-old","account_id":"acc-old"}}`)
 		parsed, canonical, err := store.NormalizeAndValidateAuth(currentRaw)

@@ -13,6 +13,7 @@ import (
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
 	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -96,10 +97,7 @@ func (f fakeUsageFetcher) Fetch(ctx context.Context, auth store.CodexAuth) (doma
 
 func newTestManager(t *testing.T) (*Manager, *memoryAuthStore, paths.Paths) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 	configRepo := store.NewConfigRepo(p)
 	authStore := &memoryAuthStore{}
 	manager := NewManager(

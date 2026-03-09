@@ -8,15 +8,13 @@ import (
 
 	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
 func TestVaultRepo_SaveLoadRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 
 	key, err := cmacrypto.RandomBytes(cmacrypto.KeyLength)
 	require.NoError(t, err)
@@ -47,9 +45,7 @@ func TestVaultRepo_SaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestVaultRepo_DefaultsAndCorruption(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 	key, err := cmacrypto.RandomBytes(cmacrypto.KeyLength)
 	require.NoError(t, err)
 

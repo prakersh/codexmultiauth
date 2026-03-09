@@ -8,15 +8,13 @@ import (
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStateRepo_SaveLoadRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 
 	now := time.Now().UTC()
 	state := domain.State{
@@ -46,13 +44,11 @@ func TestStateRepo_SaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestStateRepo_LoadCorruptJSON(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 
 	require.NoError(t, os.MkdirAll(filepath.Dir(p.StateFile), cmafs.DirMode))
 	require.NoError(t, os.WriteFile(p.StateFile, []byte("{bad"), cmafs.FileMode))
 
-	_, err = store.NewStateRepo(p).Load()
+	_, err := store.NewStateRepo(p).Load()
 	require.Error(t, err)
 }

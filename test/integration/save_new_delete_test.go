@@ -9,6 +9,7 @@ import (
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
 	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,10 +27,7 @@ func (f fakeLoginCLI) Status(ctx context.Context) (string, error) {
 
 func newManager(t *testing.T) (*app.Manager, paths.Paths, *store.CodexAuthStore) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.New(t).Paths
 
 	configRepo := store.NewConfigRepo(p)
 	authStore := store.NewCodexAuthStore(p, nil, configRepo)

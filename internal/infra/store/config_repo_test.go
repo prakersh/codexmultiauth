@@ -5,15 +5,13 @@ import (
 	"testing"
 
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
-	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	"github.com/prakersh/codexmultiauth/test/testenv"
 	"github.com/stretchr/testify/require"
 )
 
 func TestConfigRepo_Load_Defaults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	cfg, err := store.NewConfigRepo(p).Load()
 	require.NoError(t, err)
@@ -21,10 +19,7 @@ func TestConfigRepo_Load_Defaults(t *testing.T) {
 }
 
 func TestConfigRepo_Load_EnvDisablesKeyring(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CMA_DISABLE_KEYRING", "1")
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "1").Paths
 
 	cfg, err := store.NewConfigRepo(p).Load()
 	require.NoError(t, err)
@@ -32,9 +27,7 @@ func TestConfigRepo_Load_EnvDisablesKeyring(t *testing.T) {
 }
 
 func TestConfigRepo_SaveLoadAndCorruptJSON(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	p, err := paths.Resolve()
-	require.NoError(t, err)
+	p := testenv.NewWithDisableKeyring(t, "").Paths
 
 	repo := store.NewConfigRepo(p)
 	require.NoError(t, repo.Save(store.Config{DisableKeyring: true}))
@@ -51,4 +44,13 @@ func TestConfigRepo_SaveLoadAndCorruptJSON(t *testing.T) {
 	require.NoError(t, os.WriteFile(p.ConfigFile, []byte("{bad"), cmafs.FileMode))
 	_, err = repo.Load()
 	require.Error(t, err)
+}
+
+func TestConfigRepo_Load_IsDeterministicWhenExternalDisableKeyringIsPreset(t *testing.T) {
+	t.Setenv("CMA_DISABLE_KEYRING", "1")
+	p := testenv.NewWithDisableKeyring(t, "").Paths
+
+	cfg, err := store.NewConfigRepo(p).Load()
+	require.NoError(t, err)
+	require.False(t, cfg.DisableKeyring)
 }
