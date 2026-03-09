@@ -17,6 +17,7 @@ cat > "${FAKE_BIN}/go" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "go $*" >> "${APP_SH_TEST_LOG}"
+echo "env HOME=${HOME} XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-} CODEX_HOME=${CODEX_HOME:-} CMA_DISABLE_KEYRING=${CMA_DISABLE_KEYRING:-}" >> "${APP_SH_TEST_LOG}"
 cmd="${1:-}"
 if [[ "${cmd}" == "version" ]]; then
   echo "go version go1.24.2"
@@ -73,7 +74,42 @@ echo "gofmt $*" >> "${APP_SH_TEST_LOG}"
 exit 0
 EOF
 
-chmod +x "${FAKE_BIN}/go" "${FAKE_BIN}/git" "${FAKE_BIN}/gofmt"
+cat > "${FAKE_BIN}/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "gh $*" >> "${APP_SH_TEST_LOG}"
+if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+  echo "github.com"
+  exit 0
+fi
+if [[ "${1:-}" == "release" && "${2:-}" == "create" ]]; then
+  echo "https://github.com/prakersh/codexmultiauth/releases/tag/${3:-unknown}"
+  exit 0
+fi
+exit 0
+EOF
+
+cat > "${FAKE_BIN}/shasum" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "shasum $*" >> "${APP_SH_TEST_LOG}"
+if [[ "${1:-}" == "-a" ]]; then
+  shift 2
+fi
+for file in "$@"; do
+  echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef  ${file}"
+done
+EOF
+
+cat > "${FAKE_BIN}/mktemp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dir="${TMP_DIR_FOR_FAKE_MKTEMP}/sandbox"
+mkdir -p "${dir}"
+echo "${dir}"
+EOF
+
+chmod +x "${FAKE_BIN}/go" "${FAKE_BIN}/git" "${FAKE_BIN}/gofmt" "${FAKE_BIN}/gh" "${FAKE_BIN}/shasum" "${FAKE_BIN}/mktemp"
 
 assert_contains() {
   local haystack="$1"
@@ -99,7 +135,7 @@ assert_order() {
   local prev=0
   for token in "$@"; do
     local idx
-    idx="$(grep -n -F "${token}" "${file}" | head -n1 | cut -d: -f1 || true)"
+    idx="$(grep -n -x -F "${token}" "${file}" | head -n1 | cut -d: -f1 || true)"
     if [[ -z "${idx}" ]]; then
       echo "ASSERTION FAILED: missing token '${token}' in ${file}" >&2
       exit 1
@@ -113,13 +149,15 @@ assert_order() {
 }
 
 run_with_env() {
-  env PATH="${FAKE_BIN}:$PATH" APP_SH_TEST_LOG="${LOG_FILE}" APP_SH_TRACE_FILE="${TRACE_FILE}" "$@"
+  env PATH="${FAKE_BIN}:$PATH" APP_SH_TEST_LOG="${LOG_FILE}" APP_SH_TRACE_FILE="${TRACE_FILE}" TMP_DIR_FOR_FAKE_MKTEMP="${TMP_DIR}" "$@"
 }
 
 echo "test: help output"
 help_out="$(run_with_env "${APP_SH}" --help)"
 assert_contains "${help_out}" "USAGE"
 assert_contains "${help_out}" "--verify"
+assert_contains "${help_out}" "--verify-sandbox"
+assert_contains "${help_out}" "--publish-release"
 
 echo "test: unknown flag fails"
 set +e
@@ -135,8 +173,11 @@ assert_contains "${unknown_out}" "Unknown flag"
 echo "test: combined flag execution order"
 : > "${LOG_FILE}"
 : > "${TRACE_FILE}"
-run_with_env "${APP_SH}" --deps --clean --fmt --lint --test --race --cover --build --smoke --verify --release >/dev/null
-assert_order "${TRACE_FILE}" deps clean fmt lint test race cover build smoke verify release
+cat > "${TMP_DIR}/notes.md" <<'EOF'
+release notes
+EOF
+run_with_env "${APP_SH}" --deps --clean --fmt --lint --test --race --cover --build --smoke --verify --verify-sandbox --release --publish-release --draft --notes-file "${TMP_DIR}/notes.md" >/dev/null
+assert_order "${TRACE_FILE}" deps clean fmt lint test race cover build smoke verify verify-sandbox release publish-release
 
 echo "test: run arg forwarding"
 : > "${LOG_FILE}"
@@ -161,5 +202,27 @@ assert_file_contains "${LOG_FILE}" "go tool cover -func=coverage.out"
 assert_file_contains "${LOG_FILE}" "go test ./internal/... -covermode=atomic -coverprofile=coverage_internal.out"
 assert_file_contains "${LOG_FILE}" "go tool cover -func=coverage_internal.out"
 assert_file_contains "${LOG_FILE}" "go build ./..."
+
+echo "test: verify-sandbox isolates env"
+: > "${LOG_FILE}"
+: > "${TRACE_FILE}"
+run_with_env "${APP_SH}" --verify-sandbox >/dev/null
+assert_file_contains "${TRACE_FILE}" "verify-sandbox"
+assert_file_contains "${LOG_FILE}" "go test ./... -count=1"
+assert_file_contains "${LOG_FILE}" "CMA_DISABLE_KEYRING=1"
+assert_file_contains "${LOG_FILE}" "XDG_CONFIG_HOME=${TMP_DIR}/sandbox/xdg"
+assert_file_contains "${LOG_FILE}" "CODEX_HOME=${TMP_DIR}/sandbox/codex"
+
+echo "test: publish-release gates on verify-sandbox and release"
+: > "${LOG_FILE}"
+: > "${TRACE_FILE}"
+cat > "${TMP_DIR}/notes.md" <<'EOF'
+release notes
+EOF
+run_with_env "${APP_SH}" --publish-release --draft --tag v9.9.9 --notes-file "${TMP_DIR}/notes.md" >/dev/null
+assert_order "${TRACE_FILE}" publish-release verify-sandbox release
+assert_file_contains "${LOG_FILE}" "gh auth status"
+assert_file_contains "${LOG_FILE}" "gh release create v9.9.9"
+assert_file_contains "${LOG_FILE}" "shasum -a 256"
 
 echo "all app.sh tests passed"

@@ -6,7 +6,11 @@ BIN_DIR="${SCRIPT_DIR}/bin"
 DIST_DIR="${SCRIPT_DIR}/dist"
 VERSION_FILE="${SCRIPT_DIR}/cmd/VERSION"
 BINARY_PATH="${BIN_DIR}/cma"
+CHECKSUM_FILE="${DIST_DIR}/sha256sums.txt"
 SCRIPT_VERSION="1.0.0"
+HOST_HOME="${HOME:-}"
+HOST_CODEX_AUTH="${HOST_HOME}/.codex/auth.json"
+HOST_CMA_DIR="${HOST_HOME}/.config/cma"
 
 REPOSITORY_URL="https://github.com/prakersh/codexmultiauth"
 SUPPORT_URL="https://buymeacoffee.com/prakersh"
@@ -28,6 +32,71 @@ trace_step() {
     if [[ -n "${APP_SH_TRACE_FILE:-}" ]]; then
         echo "${step}" >> "${APP_SH_TRACE_FILE}"
     fi
+}
+
+stat_line() {
+    local path="$1"
+    if stat -f '%N|%HT|%m|%z|%Sp' "$path" >/dev/null 2>&1; then
+        stat -f '%N|%HT|%m|%z|%Sp' "$path"
+    else
+        stat -c '%n|%F|%Y|%s|%A' "$path"
+    fi
+}
+
+file_digest() {
+    local path="$1"
+    if command -v shasum >/dev/null 2>&1; then
+        shasum "${path}"
+        return
+    fi
+    if command -v sha1sum >/dev/null 2>&1; then
+        sha1sum "${path}"
+        return
+    fi
+    error "verify-sandbox: requires shasum or sha1sum for host metadata hashing"
+    exit 1
+}
+
+capture_host_metadata() {
+    local output="$1"
+    : > "${output}"
+    for path in "${HOST_CODEX_AUTH}" "${HOST_CMA_DIR}"; do
+        if [[ ! -e "${path}" ]]; then
+            printf 'MISSING|%s\n' "${path}" >> "${output}"
+            continue
+        fi
+        if [[ -f "${path}" ]]; then
+            printf 'FILE|%s\n' "${path}" >> "${output}"
+            stat_line "${path}" >> "${output}"
+            file_digest "${path}" >> "${output}"
+            continue
+        fi
+        if [[ -d "${path}" ]]; then
+            printf 'DIR|%s\n' "${path}" >> "${output}"
+            stat_line "${path}" >> "${output}"
+            find "${path}" -print0 | sort -z | while IFS= read -r -d '' item; do
+                stat_line "${item}" >> "${output}"
+                if [[ -f "${item}" ]]; then
+                    file_digest "${item}" >> "${output}"
+                fi
+            done
+            continue
+        fi
+        printf 'OTHER|%s\n' "${path}" >> "${output}"
+        stat_line "${path}" >> "${output}"
+    done
+}
+
+ensure_host_unchanged() {
+    local before="$1"
+    local after="$2"
+    if cmp -s "${before}" "${after}"; then
+        success "verify-sandbox: host paths unchanged"
+        return
+    fi
+    error "verify-sandbox: host mutation detected"
+    diff -u "${before}" "${after}" || true
+    exit 1
 }
 
 read_app_version() {
@@ -77,7 +146,12 @@ ${CYAN}FLAGS:${NC}
   --run, -r           Build and run cma (args after --)
   --smoke, -s         Quick checks (vet + build + short test)
   --verify            Full verification matrix
+  --verify-sandbox    Full verification matrix in isolated temp HOME/XDG/CODEX
   --release           Build dist binaries for darwin/linux amd64+arm64
+  --publish-release   Draft-first GitHub release publish flow
+  --tag <tag>         Override release tag (default: v<cmd/VERSION>)
+  --draft             Create GitHub release as draft (default behavior)
+  --notes-file <path> Release notes file for GitHub release
   --version           Print script/app version info
 
 ${CYAN}EXAMPLES:${NC}
@@ -86,10 +160,12 @@ ${CYAN}EXAMPLES:${NC}
   ./app.sh --run -- version
   ./app.sh --run -- tui
   ./app.sh --verify
+  ./app.sh --verify-sandbox
   ./app.sh --release
+  ./app.sh --publish-release --draft --notes-file docs/release-notes.md
 
 ${CYAN}ORDER:${NC}
-  deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> release -> run
+  deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> verify-sandbox -> release -> publish-release -> run
 EOF
 }
 
@@ -225,14 +301,115 @@ do_verify() {
     success "verify: done"
 }
 
+default_release_tag() {
+    echo "v$(read_app_version)"
+}
+
+checksum_cmd() {
+    if command -v shasum >/dev/null 2>&1; then
+        echo "shasum -a 256"
+        return
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        echo "sha256sum"
+        return
+    fi
+    error "release: requires shasum or sha256sum for checksums"
+    exit 1
+}
+
+required_release_assets() {
+    local version="$1"
+    printf '%s\n' \
+        "${DIST_DIR}/cma_${version}_darwin_arm64" \
+        "${DIST_DIR}/cma_${version}_darwin_amd64" \
+        "${DIST_DIR}/cma_${version}_linux_amd64" \
+        "${DIST_DIR}/cma_${version}_linux_arm64"
+}
+
+generate_checksums() {
+    local version="$1"
+    local checksum_tool
+    local assets=()
+    local asset
+    checksum_tool="$(checksum_cmd)"
+    info "release: generating ${CHECKSUM_FILE}"
+    mkdir -p "${DIST_DIR}"
+    while IFS= read -r asset; do
+        assets+=("${asset}")
+    done < <(required_release_assets "${version}")
+    case "${checksum_tool}" in
+        "shasum -a 256")
+            (cd "${DIST_DIR}" && shasum -a 256 "$(basename "${assets[0]}")" "$(basename "${assets[1]}")" "$(basename "${assets[2]}")" "$(basename "${assets[3]}")") > "${CHECKSUM_FILE}"
+            ;;
+        "sha256sum")
+            (cd "${DIST_DIR}" && sha256sum "$(basename "${assets[0]}")" "$(basename "${assets[1]}")" "$(basename "${assets[2]}")" "$(basename "${assets[3]}")") > "${CHECKSUM_FILE}"
+            ;;
+    esac
+}
+
+ensure_release_artifacts() {
+    local version="$1"
+    local asset
+    while IFS= read -r asset; do
+        if [[ ! -f "${asset}" ]]; then
+            error "release: missing artifact ${asset}"
+            exit 1
+        fi
+    done < <(required_release_assets "${version}")
+    if [[ ! -f "${CHECKSUM_FILE}" ]]; then
+        error "release: missing checksum file ${CHECKSUM_FILE}"
+        exit 1
+    fi
+}
+
+do_verify_sandbox() {
+    trace_step "verify-sandbox"
+    if [[ "${VERIFY_SANDBOX_DONE}" == "true" ]]; then
+        success "verify-sandbox: already passed"
+        return
+    fi
+
+    info "verify-sandbox: running full matrix in isolated temp sandbox"
+    local tmproot pre_meta post_meta sandbox_home sandbox_xdg sandbox_codex
+    tmproot="$(mktemp -d)"
+    sandbox_home="${tmproot}/home"
+    sandbox_xdg="${tmproot}/xdg"
+    sandbox_codex="${tmproot}/codex"
+    mkdir -p "${sandbox_home}" "${sandbox_xdg}" "${sandbox_codex}"
+    pre_meta="${tmproot}/host_pre.txt"
+    post_meta="${tmproot}/host_post.txt"
+
+    capture_host_metadata "${pre_meta}"
+    (
+        export HOME="${sandbox_home}"
+        export XDG_CONFIG_HOME="${sandbox_xdg}"
+        export CODEX_HOME="${sandbox_codex}"
+        export CMA_DISABLE_KEYRING=1
+        info "verify-sandbox: HOME=${HOME}"
+        info "verify-sandbox: XDG_CONFIG_HOME=${XDG_CONFIG_HOME}"
+        info "verify-sandbox: CODEX_HOME=${CODEX_HOME}"
+        do_verify
+    )
+    capture_host_metadata "${post_meta}"
+    ensure_host_unchanged "${pre_meta}" "${post_meta}"
+    VERIFY_SANDBOX_DONE=true
+    success "verify-sandbox: done"
+}
+
 do_release() {
     trace_step "release"
+    if [[ "${RELEASE_DONE}" == "true" ]]; then
+        success "release: already built"
+        return
+    fi
     local version commit date ldflags
     version="$(read_app_version)"
     commit="$(build_commit)"
     date="$(build_date)"
     ldflags="$(build_ldflags "${version}" "${commit}" "${date}")"
     info "release: building dist artifacts for version ${version}"
+    rm -rf "${DIST_DIR}"
     mkdir -p "${DIST_DIR}"
 
     local targets=(
@@ -249,7 +426,84 @@ do_release() {
         info "release: ${output}"
         (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build -ldflags "${ldflags}" -o "${output}" .)
     done
+    generate_checksums "${version}"
+    RELEASE_DONE=true
     success "release: done"
+}
+
+ensure_gh_ready() {
+    if ! command -v gh >/dev/null 2>&1; then
+        error "publish-release: gh CLI is required"
+        exit 1
+    fi
+    info "publish-release: checking gh auth status"
+    gh auth status >/dev/null
+}
+
+ensure_release_notes_file() {
+    if [[ -n "${RELEASE_NOTES_FILE}" ]]; then
+        if [[ ! -f "${RELEASE_NOTES_FILE}" ]]; then
+            error "publish-release: notes file not found: ${RELEASE_NOTES_FILE}"
+            exit 1
+        fi
+        echo "${RELEASE_NOTES_FILE}"
+        return
+    fi
+
+    local tmp_notes version commit
+    version="$(read_app_version)"
+    commit="$(build_commit)"
+    tmp_notes="$(mktemp)"
+    cat > "${tmp_notes}" <<EOF
+## cma ${version}
+
+- Version: ${version}
+- Commit: ${commit}
+- Repository: ${REPOSITORY_URL}
+- Support: ${SUPPORT_URL}
+- Verification: sandbox verification and release artifact build passed
+EOF
+    echo "${tmp_notes}"
+}
+
+do_publish_release() {
+    trace_step "publish-release"
+    info "publish-release: preparing GitHub release"
+
+    if [[ "${VERIFY_SANDBOX_DONE}" != "true" ]]; then
+        do_verify_sandbox
+    fi
+    if [[ "${RELEASE_DONE}" != "true" ]]; then
+        do_release
+    fi
+
+    ensure_gh_ready
+
+    local version tag notes_file release_title release_url
+    version="$(read_app_version)"
+    tag="${RELEASE_TAG:-$(default_release_tag)}"
+    notes_file="$(ensure_release_notes_file)"
+
+    if git ls-remote --tags origin "refs/tags/${tag}" | grep -q .; then
+        error "publish-release: remote tag already exists: ${tag}"
+        exit 1
+    fi
+
+    ensure_release_artifacts "${version}"
+
+    release_title="cma ${version}"
+    info "publish-release: creating GitHub release ${tag}"
+    local release_assets=()
+    local release_asset
+    while IFS= read -r release_asset; do
+        release_assets+=("${release_asset}")
+    done < <(required_release_assets "${version}")
+    if [[ "${RELEASE_DRAFT}" == "true" ]]; then
+        release_url="$(gh release create "${tag}" "${release_assets[@]}" "${CHECKSUM_FILE}" --title "${release_title}" --notes-file "${notes_file}" --draft)"
+    else
+        release_url="$(gh release create "${tag}" "${release_assets[@]}" "${CHECKSUM_FILE}" --title "${release_title}" --notes-file "${notes_file}")"
+    fi
+    success "publish-release: ${release_url}"
 }
 
 do_run() {
@@ -289,9 +543,16 @@ DO_BUILD=false
 DO_RUN=false
 DO_SMOKE=false
 DO_VERIFY=false
+DO_VERIFY_SANDBOX=false
 DO_RELEASE=false
+DO_PUBLISH_RELEASE=false
 DO_VERSION=false
 RUN_ARGS=()
+RELEASE_TAG=""
+RELEASE_DRAFT=true
+RELEASE_NOTES_FILE=""
+VERIFY_SANDBOX_DONE=false
+RELEASE_DONE=false
 
 if [[ $# -eq 0 ]]; then
     usage
@@ -337,8 +598,33 @@ while [[ $# -gt 0 ]]; do
         --verify)
             DO_VERIFY=true
             ;;
+        --verify-sandbox)
+            DO_VERIFY_SANDBOX=true
+            ;;
         --release)
             DO_RELEASE=true
+            ;;
+        --publish-release)
+            DO_PUBLISH_RELEASE=true
+            ;;
+        --tag)
+            shift
+            if [[ $# -eq 0 ]]; then
+                error "--tag requires a value"
+                exit 1
+            fi
+            RELEASE_TAG="$1"
+            ;;
+        --draft)
+            RELEASE_DRAFT=true
+            ;;
+        --notes-file)
+            shift
+            if [[ $# -eq 0 ]]; then
+                error "--notes-file requires a path"
+                exit 1
+            fi
+            RELEASE_NOTES_FILE="$1"
             ;;
         --version)
             DO_VERSION=true
@@ -396,8 +682,14 @@ fi
 if [[ "${DO_VERIFY}" == "true" ]]; then
     do_verify
 fi
+if [[ "${DO_VERIFY_SANDBOX}" == "true" ]]; then
+    do_verify_sandbox
+fi
 if [[ "${DO_RELEASE}" == "true" ]]; then
     do_release
+fi
+if [[ "${DO_PUBLISH_RELEASE}" == "true" ]]; then
+    do_publish_release
 fi
 if [[ "${DO_RUN}" == "true" ]]; then
     if [[ "${#RUN_ARGS[@]}" -gt 0 ]]; then
