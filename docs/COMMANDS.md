@@ -10,8 +10,38 @@ Common orchestration examples:
 ```bash
 ./app.sh --smoke
 ./app.sh --verify
+./app.sh --verify-sandbox
 ./app.sh --build
+./app.sh --release
+./app.sh --publish-release --draft --notes-file docs/release-notes.md
 ./app.sh --run -- version
+```
+
+Thin wrapper commands:
+
+```bash
+./test.sh quick
+./test.sh full
+./test.sh prerelease
+./test.sh publish -- --notes-file docs/release-notes.md
+```
+
+Release-related `app.sh` flags:
+
+- `--verify-sandbox` run the full verify matrix inside a temp HOME/XDG/CODEX sandbox
+- `--release` build `dist/*` artifacts and `dist/sha256sums.txt`
+- `--publish-release` verify in sandbox, build release artifacts, then create a GitHub release
+- `--tag <tag>` override the default tag `v<cmd/VERSION>`
+- `--draft` create the GitHub release as a draft
+- `--notes-file <path>` supply release notes for GitHub release creation
+
+Recommended draft-first flow:
+
+```bash
+./app.sh --verify-sandbox
+./app.sh --release
+./app.sh --publish-release --draft --notes-file docs/release-notes.md
+gh release edit v$(cat cmd/VERSION) --draft=false
 ```
 
 ## Root

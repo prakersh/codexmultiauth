@@ -91,8 +91,11 @@ Use `./app.sh` as the standard project workflow entrypoint for building, testing
 # Quick pre-commit checks
 ./app.sh --smoke
 
-# Full verification matrix
+# Full host-shell verification matrix
 ./app.sh --verify
+
+# Full verification in isolated temp HOME/XDG/CODEX
+./app.sh --verify-sandbox
 
 # Build local binary (./bin/cma)
 ./app.sh --build
@@ -103,11 +106,53 @@ Use `./app.sh` as the standard project workflow entrypoint for building, testing
 
 # Cross-platform release artifacts (./dist)
 ./app.sh --release
+
+# Draft-first GitHub release publish
+./app.sh --publish-release --draft --notes-file docs/release-notes.md
 ```
 
 Execution order for combined flags:
 
-`deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> release -> run`
+`deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> verify-sandbox -> release -> publish-release -> run`
+
+## `test.sh` - Fast Wrapper Commands
+
+`./test.sh` is a small convenience layer over `./app.sh`.
+
+```bash
+./test.sh quick
+./test.sh full
+./test.sh prerelease
+./test.sh publish -- --notes-file docs/release-notes.md
+```
+
+Mappings:
+
+- `./test.sh quick` -> `./app.sh --smoke`
+- `./test.sh full` -> `./app.sh --verify-sandbox`
+- `./test.sh prerelease` -> `./app.sh --verify-sandbox --release`
+- `./test.sh publish` -> `./app.sh --publish-release --draft`
+
+## Release Workflow
+
+Recommended path:
+
+```bash
+# 1. Verify in isolated temp HOME/XDG/CODEX
+./app.sh --verify-sandbox
+
+# 2. Build dist artifacts and checksums
+./app.sh --release
+
+# 3. Create GitHub draft release with assets
+./app.sh --publish-release --draft --notes-file docs/release-notes.md
+```
+
+To publish a draft release after review:
+
+```bash
+gh release edit v$(cat cmd/VERSION) --draft=false
+```
 
 ## Command Overview
 
