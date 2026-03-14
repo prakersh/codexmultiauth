@@ -82,18 +82,50 @@ func (f fakeCLI) Login(ctx context.Context, deviceAuth bool) error {
 
 func (f fakeCLI) Status(ctx context.Context) (string, error) { return "", nil }
 
+type fakeTokenRefresher struct {
+	maybeRefresh func(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error)
+	refresh      func(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error)
+}
+
+func (f fakeTokenRefresher) MaybeRefresh(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error) {
+	if f.maybeRefresh != nil {
+		return f.maybeRefresh(ctx, auth)
+	}
+	return auth, false, nil
+}
+
+func (f fakeTokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error) {
+	if f.refresh != nil {
+		return f.refresh(ctx, auth)
+	}
+	return f.MaybeRefresh(ctx, auth)
+}
+
+type capturingUsageFetcher struct {
+	result     domain.UsageSummary
+	err        error
+	lastAuth   store.CodexAuth
+	callCount  int
+}
+
 type fakeUsageFetcher struct {
 	result domain.UsageSummary
 	err    error
 }
 
-type brokenStateRepo struct{ StateRepository }
-
-func (b brokenStateRepo) Save(state domain.State) error { return errors.New("save failed") }
+func (f *capturingUsageFetcher) Fetch(ctx context.Context, auth store.CodexAuth) (domain.UsageSummary, error) {
+	f.callCount++
+	f.lastAuth = auth
+	return f.result, f.err
+}
 
 func (f fakeUsageFetcher) Fetch(ctx context.Context, auth store.CodexAuth) (domain.UsageSummary, error) {
 	return f.result, f.err
 }
+
+type brokenStateRepo struct{ StateRepository }
+
+func (b brokenStateRepo) Save(state domain.State) error { return errors.New("save failed") }
 
 func newTestManager(t *testing.T) (*Manager, *memoryAuthStore, paths.Paths) {
 	t.Helper()
@@ -335,6 +367,89 @@ func TestDeleteActiveWithoutAllowanceAndUsageMissingEntry(t *testing.T) {
 	require.NoError(t, manager.vaultRepo.Save(vault, key))
 	_, err = manager.Usage(ctx, saved.Account.ID)
 	require.Error(t, err)
+}
+
+func TestUsageWithTokenRefreshPersistsVaultAndActiveAuth(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	original := []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"old-token","refresh_token":"refresh-old","id_token":"id-old","account_id":"acc-1"}}`)
+	authStore.setRaw(t, original, domain.AuthStoreFile)
+	saved, err := manager.Save(ctx, SaveInput{DisplayName: "work"})
+	require.NoError(t, err)
+	_, err = manager.Activate(ctx, saved.Account.ID)
+	require.NoError(t, err)
+
+	refreshed := store.CodexAuth{
+		AuthMode: "chatgpt",
+		Tokens: &store.CodexTokens{
+			AccessToken:  "new-token",
+			RefreshToken: "refresh-new",
+			IDToken:      "id-new",
+			AccountID:    "acc-1",
+		},
+	}
+	manager.SetTokenRefresher(fakeTokenRefresher{
+		maybeRefresh: func(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error) {
+			return refreshed, true, nil
+		},
+	})
+
+	fetcher := &capturingUsageFetcher{result: domain.UsageSummary{Confidence: domain.UsageConfidenceConfirmed, PlanType: "team"}}
+	manager.SetUsageFetcher(fetcher)
+
+	results, err := manager.Usage(ctx, saved.Account.ID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, domain.UsageConfidenceConfirmed, results[0].Usage.Confidence)
+	require.Equal(t, 1, fetcher.callCount)
+	require.Equal(t, "new-token", fetcher.lastAuth.Tokens.AccessToken)
+
+	record, err := authStore.Load(ctx)
+	require.NoError(t, err)
+	require.Contains(t, string(record.Canonical), `"access_token":"new-token"`)
+	require.Contains(t, string(record.Canonical), `"refresh_token":"refresh-new"`)
+
+	state, vault, _, err := manager.loadStateAndVault(ctx)
+	require.NoError(t, err)
+	require.Equal(t, saved.Account.ID, state.ActiveAccountID)
+	require.Equal(t, record.Fingerprint, state.Accounts[0].Fingerprint)
+	entry, ok := findVaultEntry(vault, saved.Account.ID)
+	require.True(t, ok)
+	parsed, canonical, err := store.NormalizeAndValidateAuth(entry.Payload)
+	require.NoError(t, err)
+	require.Equal(t, "new-token", parsed.Tokens.AccessToken)
+	require.Equal(t, store.FingerprintAuth(canonical), entry.Fingerprint)
+	require.Equal(t, store.FingerprintAuth(canonical), state.Accounts[0].Fingerprint)
+}
+
+func TestUsageWithTokenRefreshErrorContinues(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	original := []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"old-token","refresh_token":"refresh-old","id_token":"id-old","account_id":"acc-1"}}`)
+	authStore.setRaw(t, original, domain.AuthStoreFile)
+	saved, err := manager.Save(ctx, SaveInput{DisplayName: "work"})
+	require.NoError(t, err)
+
+	manager.SetTokenRefresher(fakeTokenRefresher{
+		maybeRefresh: func(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error) {
+			return auth, false, errors.New("refresh failed")
+		},
+	})
+	fetcher := &capturingUsageFetcher{result: domain.UsageSummary{Confidence: domain.UsageConfidenceConfirmed, PlanType: "team"}}
+	manager.SetUsageFetcher(fetcher)
+
+	results, err := manager.Usage(ctx, saved.Account.ID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, 1, fetcher.callCount)
+	require.Equal(t, "old-token", fetcher.lastAuth.Tokens.AccessToken)
+
+	record, err := authStore.Load(ctx)
+	require.NoError(t, err)
+	require.Contains(t, string(record.Canonical), `"access_token":"old-token"`)
+	require.Contains(t, string(record.Canonical), `"refresh_token":"refresh-old"`)
 }
 
 func TestCommitStateAndVaultRollbackAndFilterCandidates(t *testing.T) {

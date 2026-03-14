@@ -177,6 +177,120 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+
+func TestTokenRefresherMaybeRefreshBranches(t *testing.T) {
+	now := time.Date(2026, 3, 14, 15, 0, 0, 0, time.UTC)
+	refresher := NewTokenRefresher()
+	refresher.Now = func() time.Time { return now }
+
+	t.Run("no refresh token returns unchanged", func(t *testing.T) {
+		auth := store.CodexAuth{Tokens: &store.CodexTokens{AccessToken: "a", IDToken: buildIDTokenWithExp(t, now.Add(time.Hour))}}
+		updated, changed, err := refresher.MaybeRefresh(context.Background(), auth)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, auth, updated)
+	})
+
+	t.Run("not expiring soon skips network refresh", func(t *testing.T) {
+		called := false
+		refresher.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			return nil, errors.New("should not call refresh endpoint")
+		})}
+		auth := store.CodexAuth{Tokens: &store.CodexTokens{AccessToken: "a", RefreshToken: "r", IDToken: buildIDTokenWithExp(t, now.Add(48 * time.Hour))}}
+		updated, changed, err := refresher.MaybeRefresh(context.Background(), auth)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, auth, updated)
+		require.False(t, called)
+	})
+}
+
+func TestTokenRefresherRefreshSuccess(t *testing.T) {
+	now := time.Date(2026, 3, 14, 15, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "refresh_token", r.Form.Get("grant_type"))
+		require.Equal(t, "refresh-old", r.Form.Get("refresh_token"))
+		require.Equal(t, codexOAuthClientID, r.Form.Get("client_id"))
+		require.Equal(t, codexOAuthScope, r.Form.Get("scope"))
+		_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","id_token":"id-new","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	refresher := NewTokenRefresher()
+	refresher.Now = func() time.Time { return now }
+	refresher.OAuthURL = server.URL
+	refresher.HTTPClient = server.Client()
+
+	auth := store.CodexAuth{Tokens: &store.CodexTokens{
+		AccessToken:  "access-old",
+		RefreshToken: "refresh-old",
+		IDToken:      buildIDTokenWithExp(t, now.Add(time.Hour)),
+		AccountID:    "acc-1",
+	}}
+	updated, changed, err := refresher.MaybeRefresh(context.Background(), auth)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "access-new", updated.Tokens.AccessToken)
+	require.Equal(t, "refresh-new", updated.Tokens.RefreshToken)
+	require.Equal(t, "id-new", updated.Tokens.IDToken)
+	require.Equal(t, "acc-1", updated.Tokens.AccountID)
+	require.NotNil(t, updated.LastRefresh)
+	require.Equal(t, now.UTC(), *updated.LastRefresh)
+}
+
+func TestTokenRefresherRefreshErrorPaths(t *testing.T) {
+	now := time.Date(2026, 3, 14, 15, 0, 0, 0, time.UTC)
+	auth := store.CodexAuth{Tokens: &store.CodexTokens{
+		AccessToken:  "access-old",
+		RefreshToken: "refresh-old",
+		IDToken:      buildIDTokenWithExp(t, now.Add(time.Hour)),
+	}}
+
+	t.Run("non-200 response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "denied", http.StatusUnauthorized)
+		}))
+		defer server.Close()
+
+		refresher := NewTokenRefresher()
+		refresher.Now = func() time.Time { return now }
+		refresher.OAuthURL = server.URL
+		refresher.HTTPClient = server.Client()
+
+		updated, changed, err := refresher.Refresh(context.Background(), auth)
+		require.Error(t, err)
+		require.False(t, changed)
+		require.Equal(t, auth, updated)
+		require.Contains(t, err.Error(), "status 401")
+	})
+
+	t.Run("malformed success body", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}))
+		defer server.Close()
+
+		refresher := NewTokenRefresher()
+		refresher.Now = func() time.Time { return now }
+		refresher.OAuthURL = server.URL
+		refresher.HTTPClient = server.Client()
+
+		updated, changed, err := refresher.Refresh(context.Background(), auth)
+		require.Error(t, err)
+		require.False(t, changed)
+		require.Equal(t, auth, updated)
+		require.Contains(t, err.Error(), "parse refresh response")
+	})
+}
+
+func buildIDTokenWithExp(t *testing.T, exp time.Time) string {
+	t.Helper()
+	return buildJWT(t, map[string]any{"exp": exp.Unix()})
+}
+
 func buildJWT(t *testing.T, payload map[string]any) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "none", "typ": "JWT"})
