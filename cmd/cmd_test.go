@@ -217,6 +217,11 @@ func TestCommandWorkflows(t *testing.T) {
 	require.Contains(t, output, "plan: team")
 	require.Contains(t, output, "Review Requests: unknown")
 
+	output, err = runCommand(newLimitsCmd())
+	require.NoError(t, err)
+	require.Contains(t, output, "work")
+	require.Equal(t, "all", svc.lastUsage)
+
 	output, err = runCommand(newSaveCmd(), "--name", "named", "--aliases", "one,two")
 	require.NoError(t, err)
 	require.Contains(t, output, "Saved saved")
