@@ -1,20 +1,20 @@
 # Backup and Restore
 
-## Backup Format
+## Backup format
 
-Backup artifacts are JSON files with versioned structure.
+Backup artifacts are versioned JSON files with encrypted account payloads.
 
-- file version: `cma-backup-v1`
+- backup version: `cma-backup-v1`
 - envelope version: `cma-envelope-v1`
 - KDF: `Argon2id`
 - AEAD: `XChaCha20-Poly1305`
 
-File stores:
+Each backup stores:
 
-- backup manifest (`version`, `created_at`, `account_ids`)
-- encrypted account records (`account` metadata + auth payload bytes)
+- manifest metadata (`version`, `created_at`, `account_ids`)
+- encrypted account records (account metadata + auth payload bytes)
 
-## Creating Backups
+## Create backups
 
 ```bash
 cma backup prompt nightly
@@ -22,50 +22,61 @@ cma backup env:CMA_PASS nightly
 cma backup hash:736563726574 /abs/path/nightly.cma.bak
 ```
 
-Relative names are saved under `~/.config/cma/backups/` (or `$XDG_CONFIG_HOME/cma/backups/`).
+Target rules:
 
-## Restore Modes
+- absolute path: writes exactly to that path
+- name only: writes under `${XDG_CONFIG_HOME:-~/.config}/cma/backups/`
 
-### Interactive Selection (default)
+## Restore modes
 
-`cma restore ...` without `--all`:
+### Interactive subset restore (default)
 
-1. decrypts backup
-2. inspects account candidates
-3. prompts for selected accounts
-4. applies restore for chosen subset
+When `--all` is not set, restore flow is:
 
-### Atomic All (`--all`)
+1. decrypt backup
+2. inspect candidates
+3. prompt for selected accounts
+4. apply restore to selected subset
+
+### Atomic restore-all (`--all`)
 
 `cma restore ... --all` restores all candidates in one mutation path.
 
-## Conflict Policies
+## Conflict policies
 
-When imported candidates conflict with existing accounts:
+If imported accounts conflict with existing entries:
 
-- `ask`  
-  Requires explicit decision per conflict.
-- `overwrite`  
-  Replaces existing account metadata/payload with incoming data.
-- `skip`  
-  Keeps existing account and ignores incoming conflict record.
-- `rename`  
-  Imports incoming account with a generated display name suffix.
+- `ask`: require explicit decision per conflict
+- `overwrite`: replace existing metadata and payload
+- `skip`: keep existing account and ignore incoming record
+- `rename`: import incoming account with generated display name suffix
 
 Conflict detection order:
 
 1. fingerprint
-2. account id
+2. account ID
 3. display name
 4. alias overlap
 
-## TUI Restore
+## Restore command examples
 
-`cma tui` restore flow includes:
+```bash
+cma restore prompt nightly
+cma restore env:CMA_PASS nightly --all --conflict overwrite
+cma restore hash:736563726574 /abs/path/nightly.cma.bak --conflict rename
+```
 
-1. source + passphrase input
+## TUI restore flow
+
+`cma tui` restore includes:
+
+1. source and passphrase input
 2. backup inspection
-3. selective vs all toggle
+3. subset vs all toggle
 4. conflict policy selection
-5. per-conflict decisions when policy is `ask`
+5. per-conflict decisions for `ask`
 6. restore execution through app service
+
+## Safety guarantees
+
+Backup and restore mutations use lock acquisition, atomic writes, verification, and rollback. Filesystem permission policy remains `0600` for files and `0700` for directories.

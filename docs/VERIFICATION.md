@@ -1,8 +1,8 @@
 # Verification and Release Checklist
 
-## Verification Commands
+## Verification commands
 
-Primary project checks:
+Primary checks:
 
 ```bash
 ./app.sh --smoke
@@ -25,11 +25,11 @@ GOOS=linux GOARCH=amd64 go build ./...
 GOOS=linux GOARCH=arm64 go build ./...
 ```
 
-## Sandbox Gate
+## Sandbox release gate
 
 `./app.sh --verify-sandbox` is the release gate.
 
-It runs verification in a temp sandbox with:
+It runs the full verification matrix in a temporary sandbox with:
 
 - `HOME=<temp>/home`
 - `XDG_CONFIG_HOME=<temp>/xdg`
@@ -38,18 +38,16 @@ It runs verification in a temp sandbox with:
 
 It also compares host metadata before and after the run for:
 
-- `~/.codex/auth.json` if present
-- `~/.config/cma` if present
+- `~/.codex/auth.json` (if present)
+- `~/.config/cma` (if present)
 
 Pass criteria:
 
 - full verify matrix passes
-- coverage gates remain green
-- host metadata is unchanged
+- coverage gates stay green
+- host metadata remains unchanged
 
-## Release Artifacts
-
-Build artifacts with:
+## Build release artifacts
 
 ```bash
 ./app.sh --release
@@ -66,17 +64,17 @@ Expected outputs:
 Pass criteria:
 
 - all four binaries exist
-- `sha256sums.txt` exists
+- checksum file exists
 
-## GitHub Release Flow
+## GitHub release flow
 
-Recommended draft-first path:
+Recommended draft-first flow:
 
 ```bash
 ./app.sh --publish-release --draft --notes-file docs/release-notes.md
 ```
 
-If `--notes-file` is omitted, `app.sh` generates a short draft notes file automatically.
+If `--notes-file` is omitted, `app.sh` generates draft release notes.
 
 Publish checks:
 
@@ -86,13 +84,13 @@ Publish checks:
 - release artifacts and checksums exist
 - remote tag does not already exist
 
-To publish a reviewed draft release:
+Publish a reviewed draft:
 
 ```bash
 gh release edit v$(cat cmd/VERSION) --draft=false
 ```
 
-## Current Targets
+## Coverage targets
 
 - overall coverage: `>= 80%`
 - internal coverage: `>= 80%`

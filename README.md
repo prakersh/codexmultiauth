@@ -1,48 +1,48 @@
 # CodexMultiAuth (`cma`)
 
-**The fastest way to switch Codex accounts when limits hit.**
+Switch Codex accounts quickly when limits hit.
 
-Codex is effectively single-active-auth on a local machine. When one account hits its 5-hour usage window, many users end up in repeated logout/login cycles across accounts. `cma` removes that overhead with safe account switching, encrypted storage, and encrypted backup/restore.
+Codex is effectively single-active-auth on one machine. When one account hits its window, users often repeat logout and login loops across accounts. `cma` removes that friction with safe account switching, encrypted storage, and encrypted backup and restore.
 
 Repository: https://github.com/prakersh/codexmultiauth
 
 ## Why `cma`
 
-If you run multiple Codex accounts, the pain is usually not setup - it is repeated switching after a usage window is consumed. Manual logout/login loops and auth-file handling are slow, error-prone, and distracting.
+If you use multiple Codex accounts, setup is usually easy. Repeated switching is not. Manual auth-file handling is slow and error-prone.
 
-`cma` solves that with:
+`cma` provides:
 
 - encrypted credential storage at rest
 - atomic account activation with rollback
-- encrypted backups and guided restore
+- encrypted backups with guided restore
 - confidence-tiered usage reporting
-- both CLI and TUI workflows
+- CLI and TUI workflows
 
-## Who This Is For
+## Who this is for
 
-`cma` is built for users who need fast account rotation with less overhead:
+`cma` is built for users who need fast account rotation:
 
-- **power Codex users** juggling multiple accounts to avoid repeated auth friction
-- **consultants and agencies** switching between client identities during tight delivery windows
-- **teams with strict security posture** that want fewer manual auth-file mistakes
+- power users handling multiple accounts
+- consultants or agencies switching client identities
+- teams that want fewer manual auth mistakes
 
-## Core Capabilities
+## Core capabilities
 
 - Save current Codex auth into an encrypted vault: `cma save`
 - Switch active account safely: `cma activate <selector>`
 - Create encrypted backups: `cma backup <encrypthash/pass> <name|abspath>`
 - Restore selectively or all-at-once: `cma restore ... [--all]`
 - View account usage with confidence labels: `cma usage <selector|all>`
+- Show limits for all saved accounts: `cma limits`
 - Run interactive terminal UI: `cma tui`
-- Print release info and links: `cma version`
 
 ## Requirements
 
 - Go `1.24.2`
-- `codex` CLI on `PATH` (required for `cma new` login flow)
+- `codex` CLI on `PATH` (required for `cma new`)
 - Optional OS keyring support (CMA falls back to file key storage when needed)
 
-## Quick Start
+## Quick start
 
 ### 1) Build
 
@@ -64,7 +64,20 @@ go build -o cma .
 ./cma activate 1
 ```
 
-### 3) Backup and restore
+### 3) Check usage and limits
+
+```bash
+# Usage for one account
+./cma usage work
+
+# Usage for all accounts
+./cma usage all
+
+# Limits view for all accounts
+./cma limits
+```
+
+### 4) Backup and restore
 
 ```bash
 # Encrypted backup (interactive passphrase prompt)
@@ -77,15 +90,15 @@ go build -o cma .
 ./cma restore prompt weekly-backup --all --conflict overwrite
 ```
 
-### 4) Launch the TUI
+### 5) Launch the TUI
 
 ```bash
 ./cma tui
 ```
 
-## `app.sh` - Single Entrypoint for Contributors
+## `app.sh`: single contributor entrypoint
 
-Use `./app.sh` as the standard project workflow entrypoint for building, testing, verification, and release artifacts.
+Use `./app.sh` for build, test, verification, and release workflows.
 
 ```bash
 # Quick pre-commit checks
@@ -115,9 +128,9 @@ Execution order for combined flags:
 
 `deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> verify-sandbox -> release -> publish-release -> run`
 
-## `test.sh` - Fast Wrapper Commands
+## `test.sh`: quick wrapper commands
 
-`./test.sh` is a small convenience layer over `./app.sh`.
+`./test.sh` is a thin wrapper over `./app.sh`.
 
 ```bash
 ./test.sh quick
@@ -133,7 +146,7 @@ Mappings:
 - `./test.sh prerelease` -> `./app.sh --verify-sandbox --release`
 - `./test.sh publish` -> `./app.sh --publish-release --draft`
 
-## Release Workflow
+## Release workflow
 
 Recommended path:
 
@@ -154,24 +167,25 @@ To publish a draft release after review:
 gh release edit v$(cat cmd/VERSION) --draft=false
 ```
 
-## Command Overview
+## Command overview
 
 - `cma list`
 - `cma usage <selector|all>`
-- `cma version [--short]`
+- `cma limits`
 - `cma save`
 - `cma new [--device-auth]`
 - `cma activate <selector>`
 - `cma delete <selector>`
 - `cma backup <encrypthash/pass> <name|abspath> [--allow-plain-pass-arg]`
 - `cma restore <encrypthash/pass> <pathtobackup|name> [--all] [--conflict ask|overwrite|skip|rename] [--allow-plain-pass-arg]`
+- `cma version [--short]`
 - `cma tui`
 
 Full syntax and examples: [docs/COMMANDS.md](docs/COMMANDS.md)
 
 ## Versioning
 
-`cma version` prints the app version, repository URL, and support URL.
+`cma version` prints app version and public project links.
 
 ```bash
 ./cma version
@@ -193,27 +207,27 @@ DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 go build -ldflags "-X github.com/prakersh/codexmultiauth/cmd.Version=${VERSION} -X github.com/prakersh/codexmultiauth/cmd.Commit=${COMMIT} -X github.com/prakersh/codexmultiauth/cmd.Date=${DATE}" -o cma .
 ```
 
-## Security Model at a Glance
+## Security model at a glance
 
 - Vault and backup encryption: `XChaCha20-Poly1305`
 - Backup key derivation: `Argon2id`
 - Strict filesystem permissions: files `0600`, dirs `0700`
 - Mutations use lock + atomic write + verification + rollback
-- Secrets are not printed in normal command output
+- Normal command output avoids secret values
 
 Details: [docs/SECURITY.md](docs/SECURITY.md)
 
-## Usage Data Confidence
+## Usage confidence tiers
 
-`cma usage` labels each result as:
+`cma usage` and `cma limits` report:
 
 - `confirmed`
 - `best_effort`
 - `unknown`
 
-This prevents false precision when no stable machine-readable quota source is available. It is especially useful for users trying to decide when to rotate to another account without guessing.
+This prevents false precision when no stable machine-readable quota source is available.
 
-## Documentation Map
+## Documentation map
 
 - [docs/COMMANDS.md](docs/COMMANDS.md)
 - [docs/SECURITY.md](docs/SECURITY.md)

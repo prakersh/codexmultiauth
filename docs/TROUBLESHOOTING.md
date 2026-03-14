@@ -4,76 +4,80 @@
 
 Cause:
 
-- `codex` CLI is not available from runtime wiring.
+- `codex` CLI is unavailable from the CMA runtime environment
 
 Fix:
 
-- Ensure `codex` is installed and on `PATH`.
-- Run `codex --help` to validate.
+- install `codex` and ensure it is on `PATH`
+- run `codex --help` to confirm availability
 
 ## `load current codex auth` or auth not found
 
 Cause:
 
-- No valid auth in `${CODEX_HOME:-~/.codex}/auth.json`.
+- no valid auth exists at `${CODEX_HOME:-~/.codex}/auth.json`
 
 Fix:
 
-- Run `codex login` first.
-- Confirm `CODEX_HOME` points to expected profile directory.
+- run `codex login`
+- verify `CODEX_HOME` points to the expected profile
 
 ## Keyring issues
 
 Cause:
 
-- OS keyring unavailable or blocked in environment.
+- OS keyring is unavailable or blocked
 
 Fix:
 
-- Set `CMA_DISABLE_KEYRING=1` to force file-key mode.
-- Or set `disable_keyring: true` in `~/.config/cma/config.json`.
+- set `CMA_DISABLE_KEYRING=1` to force file-key mode
+- or set `disable_keyring: true` in `${XDG_CONFIG_HOME:-~/.config}/cma/config.json`
 
 ## Backup or restore passphrase errors
 
 Cause:
 
-- Wrong passphrase, wrong source syntax, or malformed hash.
+- wrong passphrase
+- wrong passphrase source syntax
+- malformed hash input
 
 Fix:
 
-- Use `prompt` for manual input.
-- Verify `env:VAR` exists and is non-empty.
-- Verify `hash:<hex>` is valid hex bytes.
-- Use `pass:<literal>` only with `--allow-plain-pass-arg`.
+- use `prompt` for manual entry
+- verify `env:VAR` is set and non-empty
+- verify `hash:<hex>` is valid hex
+- use `pass:<literal>` only with `--allow-plain-pass-arg`
 
 ## Selector is ambiguous or not found
 
 Cause:
 
-- Prefix matches multiple accounts, or no account matches selector.
+- selector prefix matches multiple accounts
+- selector does not match any account
 
 Fix:
 
-- Use exact selector (`index`, full `id`, exact `alias`, or exact display name).
-- Run `cma list` and choose a unique selector.
+- use exact selector (index, full ID, exact alias, or exact display name)
+- run `cma list` and choose a unique value
 
 ## Restore conflict errors with `ask`
 
 Cause:
 
-- Non-interactive path reached with unresolved `ask` conflicts.
+- non-interactive execution reached unresolved `ask` conflicts
 
 Fix:
 
-- Use CLI interactive prompts, TUI restore flow, or choose explicit `--conflict` policy.
+- run restore in interactive CLI/TUI mode
+- or choose explicit `--conflict overwrite|skip|rename`
 
-## Race test warnings on macOS linker
+## Race warnings from macOS linker
 
 Cause:
 
-- Toolchain linker warnings (for example `LC_DYSYMTAB`) may appear during `-race`.
+- toolchain-level linker warnings can appear during `go test -race`
 
 Fix:
 
-- If tests still report `ok`, treat as non-fatal warning.
-- Keep Xcode command line tools and Go toolchain updated.
+- if test output still reports `ok`, treat warnings as non-fatal
+- keep Go toolchain and Xcode command line tools updated
