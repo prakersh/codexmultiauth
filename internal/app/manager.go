@@ -48,6 +48,11 @@ type UsageFetcher interface {
 	Fetch(ctx context.Context, auth store.CodexAuth) (domain.UsageSummary, error)
 }
 
+type TokenRefresher interface {
+	MaybeRefresh(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error)
+	Refresh(ctx context.Context, auth store.CodexAuth) (store.CodexAuth, bool, error)
+}
+
 type Manager struct {
 	paths       paths.Paths
 	authStore   AuthStore
@@ -56,9 +61,10 @@ type Manager struct {
 	keyManager  KeyManager
 	lockManager LockManager
 	codexCLI    CodexCLI
-	usage       UsageFetcher
-	now         func() time.Time
-	newID       func() string
+	usage          UsageFetcher
+	tokenRefresher TokenRefresher
+	now            func() time.Time
+	newID          func() string
 }
 
 func NewManager(
@@ -71,21 +77,26 @@ func NewManager(
 	codexCLI CodexCLI,
 ) *Manager {
 	return &Manager{
-		paths:       p,
-		authStore:   authStore,
-		stateRepo:   stateRepo,
-		vaultRepo:   vaultRepo,
-		keyManager:  keyManager,
-		lockManager: lockManager,
-		codexCLI:    codexCLI,
-		usage:       nil,
-		now:         func() time.Time { return time.Now().UTC() },
-		newID:       uuid.NewString,
+		paths:          p,
+		authStore:      authStore,
+		stateRepo:      stateRepo,
+		vaultRepo:      vaultRepo,
+		keyManager:     keyManager,
+		lockManager:    lockManager,
+		codexCLI:       codexCLI,
+		usage:          nil,
+		tokenRefresher: nil,
+		now:            func() time.Time { return time.Now().UTC() },
+		newID:          uuid.NewString,
 	}
 }
 
 func (m *Manager) SetUsageFetcher(fetcher UsageFetcher) {
 	m.usage = fetcher
+}
+
+func (m *Manager) SetTokenRefresher(refresher TokenRefresher) {
+	m.tokenRefresher = refresher
 }
 
 func (m *Manager) withMutationLock(ctx context.Context, fn func() error) error {

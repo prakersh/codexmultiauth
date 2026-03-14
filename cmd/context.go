@@ -42,6 +42,7 @@ func newManager() (*app.Manager, error) {
 		codexcli.NewClient("codex"),
 	)
 	manager.SetUsageFetcher(infrausage.NewClient(""))
+	manager.SetTokenRefresher(infrausage.NewTokenRefresher())
 	return manager, nil
 }
 

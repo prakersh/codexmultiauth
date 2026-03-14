@@ -19,6 +19,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		newListCmd(),
 		newUsageCmd(),
+		newLimitsCmd(),
 		newVersionCmd(),
 		newSaveCmd(),
 		newNewCmd(),
