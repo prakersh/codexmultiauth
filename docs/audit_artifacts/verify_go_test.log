@@ -1,0 +1,13 @@
+ok  	github.com/prakersh/codexmultiauth	0.199s
+ok  	github.com/prakersh/codexmultiauth/cmd	0.347s
+ok  	github.com/prakersh/codexmultiauth/internal/app	1.593s
+ok  	github.com/prakersh/codexmultiauth/internal/domain	0.629s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/backup	0.734s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/codexcli	2.331s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/crypto	1.185s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/fs	1.663s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/paths	1.198s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/store	1.646s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/usage	1.196s
+ok  	github.com/prakersh/codexmultiauth/internal/tui	1.114s
+ok  	github.com/prakersh/codexmultiauth/test/integration	1.585s

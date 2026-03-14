@@ -1,0 +1,13 @@
+ok  	github.com/prakersh/codexmultiauth	2.813s	coverage: 88.9% of statements
+ok  	github.com/prakersh/codexmultiauth/cmd	1.878s	coverage: 86.1% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/app	4.051s	coverage: 88.1% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/domain	2.304s	coverage: 78.4% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/backup	1.078s	coverage: 78.1% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/codexcli	6.023s	coverage: 85.0% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/crypto	0.657s	coverage: 93.4% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/fs	3.991s	coverage: 87.7% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/paths	4.224s	coverage: 90.9% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/store	4.795s	coverage: 82.3% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/usage	4.265s	coverage: 91.2% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/tui	4.269s	coverage: 80.4% of statements
+ok  	github.com/prakersh/codexmultiauth/test/integration	4.963s	coverage: [no statements]

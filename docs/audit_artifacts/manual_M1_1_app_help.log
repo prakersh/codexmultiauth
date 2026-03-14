@@ -1,0 +1,31 @@
+\033[1mcma orchestration script\033[0m
+
+\033[0;36mUSAGE:\033[0m
+  ./app.sh [FLAGS...] [-- run-args...]
+
+\033[0;36mFLAGS:\033[0m
+  --help, -h          Show usage
+  --deps, -d          Verify required tooling (go, git)
+  --clean, -c         Remove build and coverage artifacts
+  --fmt               Run gofmt on project Go files
+  --lint              Run go vet ./...
+  --test, -t          Run go test ./... -count=1
+  --race              Run go test -race ./... -count=1
+  --cover             Run coverage commands and print summary
+  --build, -b         Build ./bin/cma with ldflags metadata
+  --run, -r           Build and run cma (args after --)
+  --smoke, -s         Quick checks (vet + build + short test)
+  --verify            Full verification matrix
+  --release           Build dist binaries for darwin/linux amd64+arm64
+  --version           Print script/app version info
+
+\033[0;36mEXAMPLES:\033[0m
+  ./app.sh --build
+  ./app.sh --test --cover
+  ./app.sh --run -- version
+  ./app.sh --run -- tui
+  ./app.sh --verify
+  ./app.sh --release
+
+\033[0;36mORDER:\033[0m
+  deps -> clean -> fmt -> lint -> test -> race -> cover -> build -> smoke -> verify -> release -> run

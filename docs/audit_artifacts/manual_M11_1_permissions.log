@@ -1,0 +1,8 @@
+drwx------ /tmp/cma-audit-OjXrUl/.config/cma
+-rw------- /tmp/cma-audit-OjXrUl/.config/cma/state.json
+-rw------- /tmp/cma-audit-OjXrUl/.config/cma/vault.v1.json
+-rw------- /tmp/cma-audit-OjXrUl/.config/cma/vault.key.v1
+drwx------ /tmp/cma-audit-OjXrUl/.config/cma/backups
+-rw------- /tmp/cma-audit-OjXrUl/.config/cma/backups/audit-env.cma.bak
+-rw------- /tmp/cma-audit-OjXrUl/.config/cma/backups/audit-hash.cma.bak
+drwx------ /tmp/cma-audit-OjXrUl/.config/cma/locks

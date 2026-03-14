@@ -1,0 +1,5 @@
+usage-best
+  confidence: best_effort
+  plan: plus
+usage-unknown
+  confidence: unknown

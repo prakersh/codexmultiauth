@@ -1,0 +1,27 @@
+# github.com/prakersh/codexmultiauth/internal/infra/store.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-1547184871/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+# github.com/prakersh/codexmultiauth/internal/infra/usage.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-55863339/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+# github.com/prakersh/codexmultiauth.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-2902811023/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+# github.com/prakersh/codexmultiauth/internal/app.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-2270436127/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+# github.com/prakersh/codexmultiauth/cmd.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-2483679253/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ok  	github.com/prakersh/codexmultiauth	1.532s
+ok  	github.com/prakersh/codexmultiauth/cmd	1.989s
+# github.com/prakersh/codexmultiauth/internal/tui.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-1352995768/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+# github.com/prakersh/codexmultiauth/test/integration.test
+ld: warning: '/private/var/folders/qz/99sz9qnd1gld4tqq0rgyd41m0000gn/T/go-link-737720389/000015.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ok  	github.com/prakersh/codexmultiauth/internal/app	6.597s
+ok  	github.com/prakersh/codexmultiauth/internal/domain	5.950s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/backup	6.148s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/codexcli	6.819s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/crypto	5.291s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/fs	5.739s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/paths	3.180s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/store	5.222s
+ok  	github.com/prakersh/codexmultiauth/internal/infra/usage	4.962s
+ok  	github.com/prakersh/codexmultiauth/internal/tui	4.964s
+ok  	github.com/prakersh/codexmultiauth/test/integration	5.747s

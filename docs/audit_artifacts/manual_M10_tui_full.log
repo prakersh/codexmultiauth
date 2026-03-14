@@ -1,0 +1,134 @@
+]11;?\[6n[?25l[?2004hCodexMultiAuth[K
+[K
+Accounts[K
+  1. acct-b[K
+[K
+Usage[K
+  Press u to fetch usage for the selected account[K
+[K
+j/k move  u usage  s save  a activate  d delete  b backup  R restore  r refresh [8A
+
+
+
+  2. account-acc-a (active)[K
+[K
+Usage[K
+  Press u to fetch usage for the selected account[K
+[K
+Current account saved[K
+[K
+j/k move  u usage  s save  a activate  d delete  b backup  R restore  r refresh [11A
+
+
+
+
+
+
+  acct-b [best_effort][K
+
+Usage refreshed[K
+
+[11A
+
+
+  1. acct-b (active)[K
+  2. account-acc-a[K
+
+
+
+
+Activated acct-b[K
+
+[11ACMA TUI[K
+
+> backup-20260309-065155 [K
+[K
+Enter to submit, Esc to cancel[K[J[4A
+
+> backup passphrase[K
+
+[4ACodexMultiAuth[K
+
+Accounts[K
+  1. acct-b (active)[K
+  2. account-acc-a[K
+[K
+Usage[K
+  acct-b [best_effort][K
+[K
+Activated acct-b[K
+[K
+j/k move  u usage  s save  a activate  d delete  b backup  R restore  r refresh [11A
+
+
+
+
+
+
+
+
+Backup complete[K
+
+[11A
+
+
+
+
+
+
+
+
+Usage refreshed[K
+
+[11A
+
+
+  1. account-acc-a[K
+[K
+Usage[K
+  acct-b [best_effort][K
+[K
+Deleted account[K
+[K
+j/k move  u usage  s save  a activate  d delete  b backup  R restore  r refresh [J[10ACMA TUI[K
+
+> backup name or absolute path[K
+[K
+Enter to submit, Esc to cancel[K[J[4A
+
+> restore passphrase[K
+
+[4ARestore Review[K
+
+Source: tui-backup[K
+Mode: selected[K
+Conflict policy: ask[K
+[K
+  [x] acct-b[K
+  [x] account-acc-a [conflict:fingerprint][K
+[K
+Loaded 2 backup account(s)[K
+[K
+j/k move  space toggle  A all  c cycle policy  Enter continue  Esc cancel[K[11A
+
+
+
+
+
+
+  [ ] account-acc-a [conflict:fingerprint][K
+
+
+
+[11ACodexMultiAuth[K
+
+Accounts[K
+  1. account-acc-a[K
+  2. acct-b (active)[K
+
+Usage[K
+  acct-b [best_effort][K
+
+Imported 1 account(s)[K
+
+j/k move  u usage  s save  a activate  d delete  b backup  R restore  r refresh [2K[?2004l[?25h[?1002l[?1003l[?1006l

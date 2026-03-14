@@ -1,0 +1,10 @@
+ok  	github.com/prakersh/codexmultiauth/internal/app	(cached)	coverage: 88.1% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/domain	(cached)	coverage: 78.4% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/backup	(cached)	coverage: 78.1% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/codexcli	(cached)	coverage: 85.0% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/crypto	(cached)	coverage: 93.4% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/fs	(cached)	coverage: 87.7% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/paths	(cached)	coverage: 90.9% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/store	(cached)	coverage: 82.3% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/infra/usage	(cached)	coverage: 91.2% of statements
+ok  	github.com/prakersh/codexmultiauth/internal/tui	(cached)	coverage: 80.4% of statements
