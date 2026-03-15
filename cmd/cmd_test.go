@@ -373,7 +373,7 @@ func TestVersionCommand_UsesVersionFileFallback(t *testing.T) {
 
 	output, err := runCommand(newRootCmd(), "version", "--short")
 	require.NoError(t, err)
-	require.Equal(t, "0.0.1\n", output)
+	require.Equal(t, effectiveVersion()+"\n", output)
 }
 
 func runCommand(cmd *cobra.Command, args ...string) (string, error) {
