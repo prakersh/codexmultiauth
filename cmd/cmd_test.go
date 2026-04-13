@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/prakersh/codexmultiauth/internal/app"
@@ -33,6 +34,7 @@ type fakeService struct {
 	lastRestoreInput app.RestoreInput
 	lastActivate     string
 	lastUsage        string
+	lastRenameInput  app.RenameInput
 }
 
 func (f *fakeService) List(ctx context.Context) ([]app.ListedAccount, error) { return f.listed, nil }
@@ -66,6 +68,10 @@ func (f *fakeService) Activate(ctx context.Context, selector string) (domain.Acc
 }
 func (f *fakeService) Delete(ctx context.Context, input app.DeleteInput) error {
 	f.lastDeleteInput = input
+	return nil
+}
+func (f *fakeService) Rename(ctx context.Context, input app.RenameInput) error {
+	f.lastRenameInput = input
 	return nil
 }
 
@@ -156,12 +162,30 @@ func TestCommandWorkflows(t *testing.T) {
 		},
 		usage: []app.UsageResult{
 			{
-				Account: domain.Account{DisplayName: "work"},
+				Account: domain.Account{
+					ID:            "11111111-2222-3333-4444-555555555555",
+					DisplayName:   "work",
+					Aliases:       []string{"main"},
+					AuthStoreKind: domain.AuthStoreFile,
+					CreatedAt:     time.Date(2026, 4, 14, 3, 30, 0, 0, time.UTC),
+				},
+				Info: app.UsageAccountInfo{
+					IsActive:       true,
+					AuthMode:       "chatgpt",
+					CodexAccountID: "acc-1",
+					UserEmail:      "work@example.com",
+				},
 				Usage: domain.UsageSummary{
 					Confidence: domain.UsageConfidenceConfirmed,
 					PlanType:   "team",
+					FetchedAt:  time.Date(2026, 4, 14, 3, 35, 0, 0, time.UTC),
 					Quotas: []domain.UsageQuota{
-						{DisplayName: "5-Hour Limit", UsedPercent: floatPtr(12.5)},
+						{
+							DisplayName: "5-Hour Limit",
+							UsedPercent: floatPtr(12.5),
+							Status:      "healthy",
+							ResetsAt:    timePtr(time.Date(2030, 3, 17, 17, 46, 40, 0, time.UTC)),
+						},
 						{DisplayName: "Review Requests"},
 					},
 				},
@@ -213,13 +237,19 @@ func TestCommandWorkflows(t *testing.T) {
 
 	output, err = runCommand(newUsageCmd(), "all")
 	require.NoError(t, err)
+	require.Contains(t, output, "work [active]")
+	require.Contains(t, output, "aliases: main")
+	require.Contains(t, output, "auth mode: chatgpt")
+	require.Contains(t, output, "codex account id: acc-1")
+	require.Contains(t, output, "user: work@example.com")
 	require.Contains(t, output, "confidence: confirmed")
 	require.Contains(t, output, "plan: team")
+	require.Contains(t, output, "5-Hour Limit: 12.5% used (healthy, resets 2030-03-17 17:46 UTC)")
 	require.Contains(t, output, "Review Requests: unknown")
 
 	output, err = runCommand(newLimitsCmd())
 	require.NoError(t, err)
-	require.Contains(t, output, "work")
+	require.Contains(t, output, "work [active]")
 	require.Equal(t, "all", svc.lastUsage)
 
 	output, err = runCommand(newSaveCmd(), "--name", "named", "--aliases", "one,two")
@@ -233,7 +263,7 @@ func TestCommandWorkflows(t *testing.T) {
 	require.Contains(t, output, "Already saved as saved")
 	require.Equal(t, "prompted", svc.lastSaveInput.DisplayName)
 
-	output, err = runCommand(newNewCmd(), "--device-auth")
+	output, err = runCommand(newLoginCmd(), "--device-auth")
 	require.NoError(t, err)
 	require.Contains(t, output, "Saved fresh")
 	require.Equal(t, "prompted", svc.lastNewInput.DisplayName)
@@ -269,7 +299,7 @@ func TestCommandWorkflows(t *testing.T) {
 	require.Empty(t, output)
 }
 
-func TestNewCommand_DoesNotPromptForOptionalAliases(t *testing.T) {
+func TestLoginCommand_DoesNotPromptForOptionalAliases(t *testing.T) {
 	originalService := newService
 	originalAskOne := askOne
 	defer func() {
@@ -295,11 +325,35 @@ func TestNewCommand_DoesNotPromptForOptionalAliases(t *testing.T) {
 		return nil
 	}
 
-	output, err := runCommand(newNewCmd())
+	output, err := runCommand(newLoginCmd())
 	require.NoError(t, err)
 	require.Contains(t, output, "Saved fresh")
 	require.Equal(t, "prompted", svc.lastNewInput.DisplayName)
 	require.Empty(t, svc.lastNewInput.Aliases)
+}
+
+func TestLoginCommand_WithAPIKeyDoesNotPromptForName(t *testing.T) {
+	originalService := newService
+	originalAskOne := askOne
+	defer func() {
+		newService = originalService
+		askOne = originalAskOne
+	}()
+
+	svc := &fakeService{
+		newResult: app.SaveResult{Account: domain.Account{DisplayName: "api-key-account"}},
+	}
+	newService = func() (service, error) { return svc, nil }
+	askOne = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
+		t.Fatalf("unexpected prompt for --with-api-key")
+		return nil
+	}
+
+	output, err := runCommand(newLoginCmd(), "--with-api-key")
+	require.NoError(t, err)
+	require.Contains(t, output, "Saved api-key-account")
+	require.True(t, svc.lastNewInput.WithAPIKey)
+	require.Empty(t, svc.lastNewInput.DisplayName)
 }
 
 func TestDeleteActiveCancellationAndContainsHelper(t *testing.T) {
@@ -386,5 +440,9 @@ func runCommand(cmd *cobra.Command, args ...string) (string, error) {
 }
 
 func floatPtr(value float64) *float64 {
+	return &value
+}
+
+func timePtr(value time.Time) *time.Time {
 	return &value
 }

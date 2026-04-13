@@ -73,11 +73,11 @@ func (m *memoryAuthStore) Delete(ctx context.Context) error {
 }
 
 type fakeCLI struct {
-	login func(ctx context.Context, deviceAuth bool) error
+	login func(ctx context.Context, deviceAuth bool, withAPIKey bool) error
 }
 
-func (f fakeCLI) Login(ctx context.Context, deviceAuth bool) error {
-	return f.login(ctx, deviceAuth)
+func (f fakeCLI) Login(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
+	return f.login(ctx, deviceAuth, withAPIKey)
 }
 
 func (f fakeCLI) Status(ctx context.Context) (string, error) { return "", nil }
@@ -102,10 +102,10 @@ func (f fakeTokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (
 }
 
 type capturingUsageFetcher struct {
-	result     domain.UsageSummary
-	err        error
-	lastAuth   store.CodexAuth
-	callCount  int
+	result    domain.UsageSummary
+	err       error
+	lastAuth  store.CodexAuth
+	callCount int
 }
 
 type fakeUsageFetcher struct {
@@ -139,7 +139,7 @@ func newTestManager(t *testing.T) (*Manager, *memoryAuthStore, paths.Paths) {
 		store.NewVaultRepo(p),
 		store.NewVaultKeyManager(p, configRepo, nil),
 		cmafs.NewFileLockManager(),
-		fakeCLI{login: func(ctx context.Context, deviceAuth bool) error { return nil }},
+		fakeCLI{login: func(ctx context.Context, deviceAuth bool, withAPIKey bool) error { return nil }},
 	)
 	return manager, authStore, p
 }
@@ -249,7 +249,7 @@ func TestNewRollsBackOnLoginFailure(t *testing.T) {
 	manager, authStore, _ := newTestManager(t)
 	ctx := context.Background()
 	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"old","refresh_token":"refresh-old","account_id":"acc-old"}}`), domain.AuthStoreFile)
-	manager.codexCLI = fakeCLI{login: func(ctx context.Context, deviceAuth bool) error {
+	manager.codexCLI = fakeCLI{login: func(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
 		return errors.New("login failed")
 	}}
 

@@ -9,6 +9,7 @@ type NewInput struct {
 	DisplayName string
 	Aliases     []string
 	DeviceAuth  bool
+	WithAPIKey  bool
 }
 
 func (m *Manager) New(ctx context.Context, input NewInput) (SaveResult, error) {
@@ -23,13 +24,7 @@ func (m *Manager) New(ctx context.Context, input NewInput) (SaveResult, error) {
 		originalExists = true
 	}
 
-	if originalExists {
-		if _, err := m.Save(ctx, SaveInput{}); err != nil {
-			return SaveResult{}, err
-		}
-	}
-
-	if err := m.codexCLI.Login(ctx, input.DeviceAuth); err != nil {
+	if err := m.codexCLI.Login(ctx, input.DeviceAuth, input.WithAPIKey); err != nil {
 		if rollbackErr := rollbackAuth(ctx, m.authStore, originalExists, original); rollbackErr != nil {
 			return SaveResult{}, errors.Join(err, rollbackErr)
 		}

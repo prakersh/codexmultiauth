@@ -14,11 +14,11 @@ import (
 )
 
 type fakeLoginCLI struct {
-	login func(ctx context.Context, deviceAuth bool) error
+	login func(ctx context.Context, deviceAuth bool, withAPIKey bool) error
 }
 
-func (f fakeLoginCLI) Login(ctx context.Context, deviceAuth bool) error {
-	return f.login(ctx, deviceAuth)
+func (f fakeLoginCLI) Login(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
+	return f.login(ctx, deviceAuth, withAPIKey)
 }
 
 func (f fakeLoginCLI) Status(ctx context.Context) (string, error) {
@@ -78,8 +78,9 @@ func TestNewWorkflow(t *testing.T) {
 		store.NewVaultRepo(p),
 		store.NewVaultKeyManager(p, configRepo, nil),
 		cmafs.NewFileLockManager(),
-		fakeLoginCLI{login: func(ctx context.Context, deviceAuth bool) error {
+		fakeLoginCLI{login: func(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
 			require.True(t, deviceAuth)
+			require.False(t, withAPIKey)
 			return authStore.Save(ctx, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"token-new","refresh_token":"refresh-new","account_id":"acc-new"}}`))
 		}},
 	)
@@ -90,5 +91,6 @@ func TestNewWorkflow(t *testing.T) {
 
 	listed, err := manager.List(ctx)
 	require.NoError(t, err)
-	require.Len(t, listed, 2)
+	require.Len(t, listed, 1)
+	require.Equal(t, "fresh", listed[0].Account.DisplayName)
 }

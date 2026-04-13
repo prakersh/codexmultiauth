@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
@@ -17,6 +18,7 @@ type SaveInput struct {
 type SaveResult struct {
 	Account      domain.Account
 	Deduplicated bool
+	Updated      bool
 }
 
 func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error) {
@@ -32,12 +34,24 @@ func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 			return err
 		}
 
-		for _, account := range state.Accounts {
+		aliases := uniqueStrings(input.Aliases)
+		for index, account := range state.Accounts {
 			if account.Fingerprint == record.Fingerprint {
-				result = SaveResult{Account: account, Deduplicated: true}
+				updated := applySaveMetadata(account, record, input.DisplayName, aliases)
+				if accountsEqual(updated, account) {
+					result = SaveResult{Account: account, Deduplicated: true}
+					return nil
+				}
+				state.Accounts[index] = updated
+				vault = upsertVaultEntry(vault, updated.ID, record, m.now())
+				if err := m.commitStateAndVault(state, vault, key); err != nil {
+					return err
+				}
+				result = SaveResult{Account: updated, Updated: true}
 				return nil
 			}
 		}
+
 
 		displayName := strings.TrimSpace(input.DisplayName)
 		if displayName == "" {
@@ -47,22 +61,13 @@ func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 		account := domain.Account{
 			ID:            m.newID(),
 			DisplayName:   displayName,
-			Aliases:       uniqueStrings(input.Aliases),
+			Aliases:       aliases,
 			Fingerprint:   record.Fingerprint,
 			AuthStoreKind: record.StoreKind,
 			CreatedAt:     m.now(),
 		}
 		state = upsertAccount(state, account)
-		if vault.Version == "" {
-			vault.Version = store.VaultVersionV1
-		}
-		vault.Entries = append(vault.Entries, store.VaultEntry{
-			AccountID:   account.ID,
-			Fingerprint: account.Fingerprint,
-			Payload:     record.Canonical,
-			Source:      string(record.StoreKind),
-			SavedAt:     m.now(),
-		})
+		vault = upsertVaultEntry(vault, account.ID, record, m.now())
 
 		if err := m.commitStateAndVault(state, vault, key); err != nil {
 			return err
@@ -99,4 +104,62 @@ func uniqueStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func upsertVaultEntry(vault store.Vault, accountID string, record store.AuthRecord, savedAt time.Time) store.Vault {
+	if vault.Version == "" {
+		vault.Version = store.VaultVersionV1
+	}
+	for index, entry := range vault.Entries {
+		if entry.AccountID != accountID {
+			continue
+		}
+		vault.Entries[index].Fingerprint = record.Fingerprint
+		vault.Entries[index].Payload = record.Canonical
+		vault.Entries[index].Source = string(record.StoreKind)
+		vault.Entries[index].SavedAt = savedAt
+		return vault
+	}
+	vault.Entries = append(vault.Entries, store.VaultEntry{
+		AccountID:   accountID,
+		Fingerprint: record.Fingerprint,
+		Payload:     record.Canonical,
+		Source:      string(record.StoreKind),
+		SavedAt:     savedAt,
+	})
+	return vault
+}
+
+func applySaveMetadata(account domain.Account, record store.AuthRecord, displayName string, aliases []string) domain.Account {
+	displayName = strings.TrimSpace(displayName)
+	if displayName != "" {
+		account.DisplayName = displayName
+	}
+	if len(aliases) > 0 {
+		account.Aliases = aliases
+	}
+	account.Fingerprint = record.Fingerprint
+	account.AuthStoreKind = record.StoreKind
+	return account
+}
+
+func accountsEqual(left, right domain.Account) bool {
+	if left.ID != right.ID || left.DisplayName != right.DisplayName || left.Fingerprint != right.Fingerprint || left.AuthStoreKind != right.AuthStoreKind || left.CreatedAt != right.CreatedAt {
+		return false
+	}
+	if (left.LastUsedAt == nil) != (right.LastUsedAt == nil) {
+		return false
+	}
+	if left.LastUsedAt != nil && right.LastUsedAt != nil && !left.LastUsedAt.Equal(*right.LastUsedAt) {
+		return false
+	}
+	if len(left.Aliases) != len(right.Aliases) {
+		return false
+	}
+	for index := range left.Aliases {
+		if left.Aliases[index] != right.Aliases[index] {
+			return false
+		}
+	}
+	return true
 }
