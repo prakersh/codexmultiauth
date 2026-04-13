@@ -32,6 +32,26 @@ func TestBestEffortSummary(t *testing.T) {
 	require.Equal(t, "pro", summary.PlanType)
 }
 
+func TestExtractAccountMetadata(t *testing.T) {
+	token := buildJWT(t, map[string]any{
+		"name":  "Ecom Account",
+		"email": "ecom@example.com",
+	})
+	metadata := ExtractAccountMetadata(store.CodexAuth{
+		Tokens: &store.CodexTokens{
+			AccountID: "acc-1",
+			IDToken:   token,
+		},
+	})
+	require.Equal(t, "chatgpt", metadata.AuthMode)
+	require.Equal(t, "acc-1", metadata.CodexAccountID)
+	require.Equal(t, "Ecom Account", metadata.UserName)
+	require.Equal(t, "ecom@example.com", metadata.UserEmail)
+
+	apiKeyMetadata := ExtractAccountMetadata(store.CodexAuth{OpenAIAPIKey: "sk-example"})
+	require.Equal(t, "api_key", apiKeyMetadata.AuthMode)
+}
+
 func TestClientFetchFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/backend-api/wham/usage") {
@@ -177,7 +197,6 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-
 func TestTokenRefresherMaybeRefreshBranches(t *testing.T) {
 	now := time.Date(2026, 3, 14, 15, 0, 0, 0, time.UTC)
 	refresher := NewTokenRefresher()
@@ -197,7 +216,7 @@ func TestTokenRefresherMaybeRefreshBranches(t *testing.T) {
 			called = true
 			return nil, errors.New("should not call refresh endpoint")
 		})}
-		auth := store.CodexAuth{Tokens: &store.CodexTokens{AccessToken: "a", RefreshToken: "r", IDToken: buildIDTokenWithExp(t, now.Add(48 * time.Hour))}}
+		auth := store.CodexAuth{Tokens: &store.CodexTokens{AccessToken: "a", RefreshToken: "r", IDToken: buildIDTokenWithExp(t, now.Add(48*time.Hour))}}
 		updated, changed, err := refresher.MaybeRefresh(context.Background(), auth)
 		require.NoError(t, err)
 		require.False(t, changed)

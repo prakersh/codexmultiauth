@@ -43,6 +43,10 @@ func newSaveCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "Already saved as %s\n", result.Account.DisplayName)
 				return nil
 			}
+			if result.Updated {
+				fmt.Fprintf(cmd.OutOrStdout(), "Updated %s\n", result.Account.DisplayName)
+				return nil
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Saved %s\n", result.Account.DisplayName)
 			return nil
 		},

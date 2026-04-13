@@ -20,10 +20,13 @@ func NewClient(binary string) *Client {
 	return &Client{Binary: binary}
 }
 
-func (c *Client) Login(ctx context.Context, deviceAuth bool) error {
+func (c *Client) Login(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
 	args := []string{"login"}
 	if deviceAuth {
 		args = append(args, "--device-auth")
+	}
+	if withAPIKey {
+		args = append(args, "--with-api-key")
 	}
 	cmd := exec.CommandContext(ctx, c.Binary, args...)
 	cmd.Stdin = os.Stdin

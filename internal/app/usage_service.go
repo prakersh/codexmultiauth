@@ -15,11 +15,20 @@ import (
 type UsageResult struct {
 	Account domain.Account
 	Usage   domain.UsageSummary
+	Info    UsageAccountInfo
 }
 
 type usageAuthUpdate struct {
 	Payload     []byte
 	Fingerprint string
+}
+
+type UsageAccountInfo struct {
+	IsActive       bool
+	AuthMode       string
+	CodexAccountID string
+	UserName       string
+	UserEmail      string
 }
 
 func (m *Manager) Usage(ctx context.Context, selector string) ([]UsageResult, error) {
@@ -31,6 +40,7 @@ func (m *Manager) Usage(ctx context.Context, selector string) ([]UsageResult, er
 	if err != nil {
 		return nil, err
 	}
+	activeAccountID := m.activeAccountID(ctx, state)
 
 	results := make([]UsageResult, len(accounts))
 	updates := make(map[string]usageAuthUpdate)
@@ -86,7 +96,18 @@ func (m *Manager) Usage(ctx context.Context, selector string) ([]UsageResult, er
 					summary = fetched
 				}
 			}
-			results[i] = UsageResult{Account: account, Usage: summary}
+			metadata := infrausage.ExtractAccountMetadata(auth)
+			results[i] = UsageResult{
+				Account: account,
+				Usage:   summary,
+				Info: UsageAccountInfo{
+					IsActive:       account.ID == activeAccountID,
+					AuthMode:       metadata.AuthMode,
+					CodexAccountID: metadata.CodexAccountID,
+					UserName:       metadata.UserName,
+					UserEmail:      metadata.UserEmail,
+				},
+			}
 		}(index, account)
 	}
 	wg.Wait()

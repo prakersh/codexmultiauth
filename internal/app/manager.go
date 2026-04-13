@@ -40,7 +40,7 @@ type LockManager interface {
 }
 
 type CodexCLI interface {
-	Login(ctx context.Context, deviceAuth bool) error
+	Login(ctx context.Context, deviceAuth bool, withAPIKey bool) error
 	Status(ctx context.Context) (string, error)
 }
 
@@ -54,13 +54,13 @@ type TokenRefresher interface {
 }
 
 type Manager struct {
-	paths       paths.Paths
-	authStore   AuthStore
-	stateRepo   StateRepository
-	vaultRepo   VaultRepository
-	keyManager  KeyManager
-	lockManager LockManager
-	codexCLI    CodexCLI
+	paths          paths.Paths
+	authStore      AuthStore
+	stateRepo      StateRepository
+	vaultRepo      VaultRepository
+	keyManager     KeyManager
+	lockManager    LockManager
+	codexCLI       CodexCLI
 	usage          UsageFetcher
 	tokenRefresher TokenRefresher
 	now            func() time.Time

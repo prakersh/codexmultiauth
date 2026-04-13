@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## `cma new` fails with `codex CLI runner is not configured`
+## `cma login` or `cma new` fails with `codex CLI runner is not configured`
 
 Cause:
 

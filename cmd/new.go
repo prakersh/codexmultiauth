@@ -8,20 +8,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newNewCmd() *cobra.Command {
+func newLoginCmd() *cobra.Command {
 	var name string
 	var aliases string
 	var deviceAuth bool
+	var withAPIKey bool
 
 	cmd := &cobra.Command{
-		Use:   "new",
-		Short: "Run Codex login and save the resulting account",
+		Use:     "login",
+		Aliases: []string{"new"},
+		Short:   "Run Codex login and save the resulting account",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, err := newService()
 			if err != nil {
 				return err
 			}
-			if name == "" {
+			if name == "" && !withAPIKey {
 				name, err = promptText("Account name (optional)", "")
 				if err != nil {
 					return err
@@ -31,9 +33,14 @@ func newNewCmd() *cobra.Command {
 				DisplayName: name,
 				Aliases:     splitAliases(aliases),
 				DeviceAuth:  deviceAuth,
+				WithAPIKey:  withAPIKey,
 			})
 			if err != nil {
 				return err
+			}
+			if result.Updated {
+				fmt.Fprintf(cmd.OutOrStdout(), "Updated %s\n", result.Account.DisplayName)
+				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Saved %s\n", result.Account.DisplayName)
 			return nil
@@ -42,5 +49,10 @@ func newNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "display name")
 	cmd.Flags().StringVar(&aliases, "aliases", "", "comma-separated aliases")
 	cmd.Flags().BoolVar(&deviceAuth, "device-auth", false, "use device auth flow")
+	cmd.Flags().BoolVar(&withAPIKey, "with-api-key", false, "read the API key from stdin through codex login")
 	return cmd
+}
+
+func newNewCmd() *cobra.Command {
+	return newLoginCmd()
 }

@@ -196,7 +196,7 @@ func TestNewErrorBranches(t *testing.T) {
 			store.NewVaultRepo(p),
 			store.NewVaultKeyManager(p, configRepo, nil),
 			cmafs.NewFileLockManager(),
-			fakeCLI{login: func(ctx context.Context, deviceAuth bool) error {
+			fakeCLI{login: func(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
 				afterLogin = true
 				return nil
 			}},
@@ -214,7 +214,7 @@ func TestNewErrorBranches(t *testing.T) {
 		manager, authStore, _ := newTestManager(t)
 		ctx := context.Background()
 		authStore.deleteErr = errors.New("delete failed")
-		manager.codexCLI = fakeCLI{login: func(ctx context.Context, deviceAuth bool) error {
+		manager.codexCLI = fakeCLI{login: func(ctx context.Context, deviceAuth bool, withAPIKey bool) error {
 			return errors.New("login failed")
 		}}
 
