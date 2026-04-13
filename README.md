@@ -33,13 +33,13 @@ If you use multiple Codex accounts, setup is usually easy. Repeated switching is
 - Create encrypted backups: `cma backup <encrypthash/pass> <name|abspath>`
 - Restore selectively or all-at-once: `cma restore ... [--all]`
 - View account usage with confidence labels: `cma usage <selector|all>`
-- Show limits for all saved accounts: `cma limits`
+- Show limits with account details, confidence, and reset windows: `cma limits`
 - Run interactive terminal UI: `cma tui`
 
 ## Requirements
 
 - Go `1.24.2`
-- `codex` CLI on `PATH` (required for `cma new`)
+- `codex` CLI on `PATH` (required for `cma login`)
 - Optional OS keyring support (CMA falls back to file key storage when needed)
 
 ## Quick start
@@ -173,9 +173,11 @@ gh release edit v$(cat cmd/VERSION) --draft=false
 - `cma usage <selector|all>`
 - `cma limits`
 - `cma save`
-- `cma new [--device-auth]`
+- `cma login [--device-auth|--with-api-key]`
+- `cma new [--device-auth|--with-api-key]` alias for `cma login`
 - `cma activate <selector>`
 - `cma delete <selector>`
+- `cma rename <selector> <new-name>`
 - `cma backup <encrypthash/pass> <name|abspath> [--allow-plain-pass-arg]`
 - `cma restore <encrypthash/pass> <pathtobackup|name> [--all] [--conflict ask|overwrite|skip|rename] [--allow-plain-pass-arg]`
 - `cma version [--short]`

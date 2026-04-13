@@ -60,7 +60,7 @@ cma list
 
 ### `cma usage <selector|all>`
 
-Fetch usage and print confidence labels.
+Fetch usage and print confidence labels, account details, and quota reset windows.
 
 ```bash
 cma usage work
@@ -69,7 +69,7 @@ cma usage all
 
 ### `cma limits`
 
-Show limits for all saved accounts.
+Show limits for all saved accounts with account details, confidence, and reset windows.
 
 ```bash
 cma limits
@@ -89,7 +89,7 @@ cma save
 cma save --name work --aliases main,team
 ```
 
-### `cma new [--device-auth]`
+### `cma login [--device-auth|--with-api-key]`
 
 Run Codex login and save the resulting account.
 
@@ -98,11 +98,17 @@ Flags:
 - `--name`: display name
 - `--aliases`: comma-separated aliases
 - `--device-auth`: use device auth flow
+- `--with-api-key`: read the API key from stdin through `codex login`
 
 ```bash
-cma new
-cma new --device-auth --name personal
+cma login
+cma login --device-auth --name personal
+printenv OPENAI_API_KEY | cma login --with-api-key --name api
 ```
+
+### `cma new [--device-auth|--with-api-key]`
+
+Compatibility alias for `cma login`.
 
 ### `cma activate <selector>`
 
@@ -119,6 +125,14 @@ Delete a saved account. If the account is active, CMA asks for confirmation.
 
 ```bash
 cma delete personal
+```
+
+### `cma rename <selector> <new-name>`
+
+Rename a saved account.
+
+```bash
+cma rename personal work
 ```
 
 ### `cma backup <encrypthash/pass> <name|abspath>`
