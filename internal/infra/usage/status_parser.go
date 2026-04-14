@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
@@ -28,7 +30,7 @@ type window struct {
 }
 
 type credits struct {
-	Balance *float64 `json:"balance,omitempty"`
+	Balance json.RawMessage `json:"balance,omitempty"`
 }
 
 func ParseResponse(data []byte) (domain.UsageSummary, error) {
@@ -42,7 +44,7 @@ func ParseResponse(data []byte) (domain.UsageSummary, error) {
 		FetchedAt:  time.Now().UTC(),
 	}
 	if resp.Credits != nil {
-		summary.CreditsLeft = resp.Credits.Balance
+		summary.CreditsLeft = parseFlexibleFloat(resp.Credits.Balance)
 	}
 	if resp.RateLimit.PrimaryWindow != nil {
 		summary.Quotas = append(summary.Quotas, quotaFromWindow(primaryName(resp), resp.RateLimit.PrimaryWindow))
@@ -108,4 +110,30 @@ func statusFromPercent(percent float64) string {
 	default:
 		return "healthy"
 	}
+}
+
+func parseFlexibleFloat(raw json.RawMessage) *float64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+
+	var number float64
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return &number
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return nil
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return nil
+	}
+	return &number
 }

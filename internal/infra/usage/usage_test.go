@@ -191,6 +191,26 @@ func TestParseResponseAdditionalBranches(t *testing.T) {
 	require.Equal(t, "seven_day", primaryName(resp))
 }
 
+func TestParseResponseProliteStringCreditsBalance(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"prolite",
+		"credits":{"balance":"0"},
+		"rate_limit":{
+			"primary_window":{"used_percent":14,"reset_at":1900000000,"limit_window_seconds":18000},
+			"secondary_window":{"used_percent":2,"reset_at":1900000500,"limit_window_seconds":604800}
+		}
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, "prolite", summary.PlanType)
+	require.Len(t, summary.Quotas, 2)
+	require.NotNil(t, summary.CreditsLeft)
+	require.Equal(t, 0.0, *summary.CreditsLeft)
+	require.Equal(t, "five_hour", summary.Quotas[0].Name)
+	require.Equal(t, "seven_day", summary.Quotas[1].Name)
+	require.NotNil(t, summary.Quotas[0].ResetsAt)
+	require.NotNil(t, summary.Quotas[1].ResetsAt)
+}
+
 type roundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
