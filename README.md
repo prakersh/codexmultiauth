@@ -103,6 +103,19 @@ go build -o cma .
 ./cma tui
 ```
 
+### 6) Watch limits and auto-rotate when quotas change
+
+```bash
+# Poll `cma limits` every 300 seconds and run `cma auto` when the
+# normalized limits output changes
+./autoloop.sh
+
+# Optional overrides
+CMA_BIN=/Users/prakersh/bin/cma SLEEP_SECONDS=300 ./autoloop.sh
+```
+
+`autoloop.sh` prints colored cycle headers, current limit snapshots, auto-selection results, and the next scheduled check time.
+
 ## `app.sh`: single contributor entrypoint
 
 Use `./app.sh` for build, test, verification, and release workflows.
@@ -152,6 +165,17 @@ Mappings:
 - `./test.sh full` -> `./app.sh --verify-sandbox`
 - `./test.sh prerelease` -> `./app.sh --verify-sandbox --release`
 - `./test.sh publish` -> `./app.sh --publish-release --draft`
+
+## `autoloop.sh`: limit watcher
+
+`./autoloop.sh` is a small helper that:
+
+- runs `cma auto` once at startup
+- captures `cma limits`
+- sleeps for `SLEEP_SECONDS` seconds (default `300`)
+- re-runs `cma auto` only if the normalized limits output changed
+
+It ignores the changing timestamp in the `Codex Limits` header so each cycle reacts to quota changes instead of clock noise.
 
 ## Release workflow
 
