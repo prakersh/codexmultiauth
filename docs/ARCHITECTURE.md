@@ -94,3 +94,11 @@ All mutating flows use the same safety model:
 6. fetch usage from authenticated API
 7. fall back to JWT-based best effort summary when API fetch fails
 8. return confidence tier (`confirmed`, `best_effort`, `unknown`)
+
+### Auto activation
+
+1. fetch usage for all saved accounts
+2. identify 5-hour and weekly quota entries
+3. score each account from remaining quota and reset urgency
+4. prefer the highest combined score, then higher raw headroom, then earlier resets
+5. activate the winning account through the normal activation flow

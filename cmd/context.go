@@ -22,6 +22,7 @@ type service interface {
 	Restore(ctx context.Context, input app.RestoreInput) (app.RestoreSummary, error)
 	Save(ctx context.Context, input app.SaveInput) (app.SaveResult, error)
 	New(ctx context.Context, input app.NewInput) (app.SaveResult, error)
+	AutoActivate(ctx context.Context) (domain.Account, error)
 	Activate(ctx context.Context, selector string) (domain.Account, error)
 	Delete(ctx context.Context, input app.DeleteInput) error
 	Rename(ctx context.Context, input app.RenameInput) error

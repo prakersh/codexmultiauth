@@ -30,6 +30,7 @@ If you use multiple Codex accounts, setup is usually easy. Repeated switching is
 
 - Save current Codex auth into an encrypted vault: `cma save`
 - Switch active account safely: `cma activate <selector>`
+- Auto-activate the best account by remaining quota and reset urgency: `cma auto`
 - Create encrypted backups: `cma backup <encrypthash/pass> <name|abspath>`
 - Restore selectively or all-at-once: `cma restore ... [--all]`
 - View account usage with confidence labels: `cma usage <selector|all>`
@@ -62,6 +63,9 @@ go build -o cma .
 
 # Activate an account by selector
 ./cma activate 1
+
+# Auto-pick and activate the best account
+./cma auto
 ```
 
 ### 3) Check usage and limits
@@ -75,6 +79,9 @@ go build -o cma .
 
 # Limits view for all accounts
 ./cma limits
+
+# Auto-pick the account with the best urgency-weighted remaining quota
+./cma auto
 ```
 
 ### 4) Backup and restore
@@ -172,6 +179,7 @@ gh release edit v$(cat cmd/VERSION) --draft=false
 - `cma list`
 - `cma usage <selector|all>`
 - `cma limits`
+- `cma auto`
 - `cma save`
 - `cma login [--device-auth|--with-api-key]`
 - `cma new [--device-auth|--with-api-key]` alias for `cma login`
@@ -228,6 +236,10 @@ Details: [docs/SECURITY.md](docs/SECURITY.md)
 - `unknown`
 
 This prevents false precision when no stable machine-readable quota source is available.
+
+## Auto selection
+
+`cma auto` scores each saved account from the remaining 5-hour and weekly quota headroom, then increases the weight of quota that resets sooner. This lets a weekly bucket that resets tomorrow beat a small 5-hour advantage on another account when that is the better quota to burn next.
 
 ## Documentation map
 

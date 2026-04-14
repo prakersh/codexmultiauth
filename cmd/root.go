@@ -20,6 +20,7 @@ func newRootCmd() *cobra.Command {
 		newListCmd(),
 		newUsageCmd(),
 		newLimitsCmd(),
+		newAutoCmd(),
 		newVersionCmd(),
 		newSaveCmd(),
 		newLoginCmd(),

@@ -49,6 +49,9 @@ temp/
 .tmp/
 bin/
 dist/
+/cma
+.omc/
+.omx/
 
 # Editor/IDE
 # .idea/

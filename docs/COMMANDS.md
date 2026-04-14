@@ -75,6 +75,21 @@ Show limits for all saved accounts with account details, confidence, and reset w
 cma limits
 ```
 
+### `cma auto`
+
+Choose and activate the best saved account automatically.
+
+Selection uses an urgency-weighted quota score:
+
+- more remaining 5-hour quota helps
+- more remaining weekly quota helps
+- quota that resets sooner gets extra weight
+- ties fall back to raw remaining quota, then earlier resets
+
+```bash
+cma auto
+```
+
 ### `cma save`
 
 Save the current Codex auth into the encrypted vault.

@@ -35,6 +35,9 @@ type fakeService struct {
 	lastActivate     string
 	lastUsage        string
 	lastRenameInput  app.RenameInput
+	lastAuto         bool
+
+	autoResult domain.Account
 }
 
 func (f *fakeService) List(ctx context.Context) ([]app.ListedAccount, error) { return f.listed, nil }
@@ -61,6 +64,10 @@ func (f *fakeService) Save(ctx context.Context, input app.SaveInput) (app.SaveRe
 func (f *fakeService) New(ctx context.Context, input app.NewInput) (app.SaveResult, error) {
 	f.lastNewInput = input
 	return f.newResult, nil
+}
+func (f *fakeService) AutoActivate(ctx context.Context) (domain.Account, error) {
+	f.lastAuto = true
+	return f.autoResult, nil
 }
 func (f *fakeService) Activate(ctx context.Context, selector string) (domain.Account, error) {
 	f.lastActivate = selector
@@ -193,6 +200,7 @@ func TestCommandWorkflows(t *testing.T) {
 		},
 		saveResult:     app.SaveResult{Account: domain.Account{DisplayName: "saved"}},
 		newResult:      app.SaveResult{Account: domain.Account{DisplayName: "fresh"}},
+		autoResult:     domain.Account{DisplayName: "personal"},
 		activateResult: domain.Account{DisplayName: "work"},
 		backupPath:     "/tmp/backup.cma.bak",
 		restoreSummary: app.RestoreSummary{Imported: 1},
@@ -249,8 +257,13 @@ func TestCommandWorkflows(t *testing.T) {
 
 	output, err = runCommand(newLimitsCmd())
 	require.NoError(t, err)
-	require.Contains(t, output, "work [active]")
+	require.Contains(t, output, "work *")
 	require.Equal(t, "all", svc.lastUsage)
+
+	output, err = runCommand(newAutoCmd())
+	require.NoError(t, err)
+	require.Contains(t, output, "Activated personal")
+	require.True(t, svc.lastAuto)
 
 	output, err = runCommand(newSaveCmd(), "--name", "named", "--aliases", "one,two")
 	require.NoError(t, err)
