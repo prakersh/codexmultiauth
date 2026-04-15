@@ -31,7 +31,7 @@ If you use multiple Codex accounts, setup is usually easy. Repeated switching is
 - Save current Codex auth into an encrypted vault: `cma save`
 - Switch active account safely: `cma activate <selector>`
 - Auto-activate the best account by remaining quota and reset urgency: `cma auto`
-- Create encrypted backups: `cma backup <encrypthash/pass> <name|abspath>`
+- Create encrypted backups: `cma backup <passphrase-source> <name|abspath>`
 - Restore selectively or all-at-once: `cma restore ... [--all]`
 - View account usage with confidence labels: `cma usage <selector|all>`
 - Show limits with account details, confidence, and reset windows: `cma limits`
@@ -210,8 +210,8 @@ gh release edit v$(cat cmd/VERSION) --draft=false
 - `cma activate <selector>`
 - `cma delete <selector>`
 - `cma rename <selector> <new-name>`
-- `cma backup <encrypthash/pass> <name|abspath> [--allow-plain-pass-arg]`
-- `cma restore <encrypthash/pass> <pathtobackup|name> [--all] [--conflict ask|overwrite|skip|rename] [--allow-plain-pass-arg]`
+- `cma backup <passphrase-source> <name|abspath> [--allow-plain-pass-arg]`
+- `cma restore <passphrase-source> <pathtobackup|name> [--all] [--conflict ask|overwrite|skip|rename] [--allow-plain-pass-arg]`
 - `cma version [--short]`
 - `cma tui`
 

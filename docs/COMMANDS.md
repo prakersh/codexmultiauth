@@ -47,6 +47,7 @@ If there is no match, CMA returns selector not found. If a prefix matches multip
 - `env:VAR`: read bytes from environment variable `VAR`
 - `hash:<hex>`: decode bytes from a hex string
 - `pass:<literal>`: use literal text directly (blocked unless `--allow-plain-pass-arg` is set)
+- `<literal>`: bare literal text, also blocked unless `--allow-plain-pass-arg` is set
 
 ## cma commands
 
@@ -150,13 +151,13 @@ Rename a saved account.
 cma rename personal work
 ```
 
-### `cma backup <encrypthash/pass> <name|abspath>`
+### `cma backup <passphrase-source> <name|abspath>`
 
 Write an encrypted backup artifact.
 
 Flags:
 
-- `--allow-plain-pass-arg`: allow `pass:<literal>`
+- `--allow-plain-pass-arg`: allow `pass:<literal>` and bare literal arguments
 
 ```bash
 cma backup prompt nightly
@@ -164,7 +165,7 @@ cma backup env:CMA_PASS /absolute/path/snap.cma.bak
 cma backup hash:736563726574 nightly
 ```
 
-### `cma restore <encrypthash/pass> <pathtobackup|name>`
+### `cma restore <passphrase-source> <pathtobackup|name>`
 
 Restore accounts from an encrypted backup.
 
@@ -172,7 +173,7 @@ Flags:
 
 - `--all`: restore all candidates atomically
 - `--conflict ask|overwrite|skip|rename`: conflict policy (default `ask`)
-- `--allow-plain-pass-arg`: allow `pass:<literal>`
+- `--allow-plain-pass-arg`: allow `pass:<literal>` and bare literal arguments
 
 Without `--all`, CMA prompts for account selection.
 

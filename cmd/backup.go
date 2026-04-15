@@ -11,7 +11,7 @@ import (
 func newBackupCmd() *cobra.Command {
 	var allowPlain bool
 	cmd := &cobra.Command{
-		Use:   "backup <encrypthash/pass> <name|abspath>",
+		Use:   "backup <passphrase-source> <name|abspath>",
 		Short: "Write an encrypted backup artifact",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,6 +36,6 @@ func newBackupCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow pass:<literal> sources")
+	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow plain passphrase arguments, including pass:<literal> and bare literals")
 	return cmd
 }

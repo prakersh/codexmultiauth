@@ -15,7 +15,7 @@ func newRestoreCmd() *cobra.Command {
 	var conflict string
 
 	cmd := &cobra.Command{
-		Use:   "restore <encrypthash/pass> <pathtobackup|name>",
+		Use:   "restore <passphrase-source> <pathtobackup|name>",
 		Short: "Restore accounts from an encrypted backup",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -88,7 +88,7 @@ func newRestoreCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "restore all accounts atomically")
-	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow pass:<literal> sources")
+	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow plain passphrase arguments, including pass:<literal> and bare literals")
 	cmd.Flags().StringVar(&conflict, "conflict", string(domain.ConflictAsk), "conflict policy: ask|overwrite|skip|rename")
 	return cmd
 }

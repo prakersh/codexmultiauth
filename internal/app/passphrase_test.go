@@ -23,6 +23,11 @@ func TestResolvePassphrase_Hash(t *testing.T) {
 func TestResolvePassphrase_PlainRejectedWithoutFlag(t *testing.T) {
 	_, err := app.ResolvePassphrase("pass:secret", false, nil)
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "--allow-plain-pass-arg")
+
+	_, err = app.ResolvePassphrase("secret", false, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--allow-plain-pass-arg")
 }
 
 func TestResolvePassphrase_PromptAndUnsupported(t *testing.T) {
@@ -54,6 +59,10 @@ func TestResolvePassphrase_ErrorBranches(t *testing.T) {
 	require.Error(t, err)
 
 	pass, err := app.ResolvePassphrase("pass:secret", true, nil)
+	require.NoError(t, err)
+	require.Equal(t, []byte("secret"), pass)
+
+	pass, err = app.ResolvePassphrase("secret", true, nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte("secret"), pass)
 }

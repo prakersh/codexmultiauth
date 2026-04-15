@@ -46,7 +46,7 @@ Fix:
 - use `prompt` for manual entry
 - verify `env:VAR` is set and non-empty
 - verify `hash:<hex>` is valid hex
-- use `pass:<literal>` only with `--allow-plain-pass-arg`
+- use `pass:<literal>` or a bare literal only with `--allow-plain-pass-arg`
 
 ## Selector is ambiguous or not found
 

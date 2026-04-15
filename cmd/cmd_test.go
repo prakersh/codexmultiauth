@@ -297,6 +297,15 @@ func TestCommandWorkflows(t *testing.T) {
 	require.Contains(t, output, "Backup written to /tmp/backup.cma.bak")
 	require.Equal(t, []byte("secret"), svc.lastBackupInput.Passphrase)
 
+	output, err = runCommand(newBackupCmd(), "secret", "named")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--allow-plain-pass-arg")
+
+	output, err = runCommand(newBackupCmd(), "--allow-plain-pass-arg", "secret", "named")
+	require.NoError(t, err)
+	require.Contains(t, output, "Backup written to /tmp/backup.cma.bak")
+	require.Equal(t, []byte("secret"), svc.lastBackupInput.Passphrase)
+
 	output, err = runCommand(newRestoreCmd(), "--conflict", "ask", "pass:secret", "named")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "plain passphrase arguments require --allow-plain-pass-arg")
@@ -306,6 +315,11 @@ func TestCommandWorkflows(t *testing.T) {
 	require.Contains(t, output, "Imported 1 account(s)")
 	require.Equal(t, []string{"1"}, svc.lastRestoreInput.Selected)
 	require.Equal(t, domain.ConflictRename, svc.lastRestoreInput.Decisions["1"])
+
+	output, err = runCommand(newRestoreCmd(), "--allow-plain-pass-arg", "--conflict", "ask", "secret", "named")
+	require.NoError(t, err)
+	require.Contains(t, output, "Imported 1 account(s)")
+	require.Equal(t, []byte("secret"), svc.lastRestoreInput.Passphrase)
 
 	output, err = runCommand(newTUICmd())
 	require.NoError(t, err)

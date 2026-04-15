@@ -39,10 +39,20 @@ func ResolvePassphrase(source string, allowPlain bool, prompt PromptFunc) ([]byt
 		return data, nil
 	case strings.HasPrefix(source, "pass:"):
 		if !allowPlain {
-			return nil, errors.New("plain passphrase arguments require --allow-plain-pass-arg")
+			return nil, errors.New("plain passphrase arguments require --allow-plain-pass-arg; use prompt, env:VAR, hash:<hex>, or pass:<literal>")
 		}
 		return []byte(strings.TrimPrefix(source, "pass:")), nil
+	case isBarePassphraseLiteral(source):
+		if !allowPlain {
+			return nil, errors.New("plain passphrase arguments require --allow-plain-pass-arg; use prompt, env:VAR, hash:<hex>, or pass:<literal>")
+		}
+		return []byte(source), nil
 	default:
 		return nil, fmt.Errorf("unsupported passphrase source %q", source)
 	}
+}
+
+func isBarePassphraseLiteral(source string) bool {
+	source = strings.TrimSpace(source)
+	return source != "" && !strings.Contains(source, ":")
 }
