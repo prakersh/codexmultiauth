@@ -52,7 +52,6 @@ func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 			}
 		}
 
-
 		displayName := strings.TrimSpace(input.DisplayName)
 		if displayName == "" {
 			displayName = defaultDisplayName(record, len(state.Accounts)+1)

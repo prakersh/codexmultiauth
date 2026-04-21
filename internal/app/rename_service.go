@@ -8,8 +8,8 @@ import (
 )
 
 type RenameInput struct {
-	Selector    string
-	NewName     string
+	Selector string
+	NewName  string
 }
 
 func (m *Manager) Rename(ctx context.Context, input RenameInput) error {

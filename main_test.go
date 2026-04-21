@@ -28,7 +28,9 @@ func TestMainSuccessAndFailure(t *testing.T) {
 	require.Empty(t, errOut.String())
 
 	errOut.Reset()
-	execute = func() error { return errors.New("plain passphrase arguments require --allow-plain-pass-arg: pass:supersecret") }
+	execute = func() error {
+		return errors.New("plain passphrase arguments require --allow-plain-pass-arg: pass:supersecret")
+	}
 	exit = func(code int) {
 		called = true
 		require.Equal(t, 1, code)

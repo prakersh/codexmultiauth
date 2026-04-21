@@ -28,15 +28,15 @@ type fakeService struct {
 	inspectArtifact   backup.Plaintext
 	inspectCandidates []app.RestoreCandidate
 
-	lastSaveInput    app.SaveInput
-	lastNewInput     app.NewInput
-	lastDeleteInput  app.DeleteInput
-	lastBackupInput  app.BackupInput
-	lastRestoreInput app.RestoreInput
-	lastActivate     string
-	lastUsage        string
-	lastRenameInput  app.RenameInput
-	lastAuto         bool
+	lastSaveInput       app.SaveInput
+	lastNewInput        app.NewInput
+	lastDeleteInput     app.DeleteInput
+	lastBackupInput     app.BackupInput
+	lastRestoreInput    app.RestoreInput
+	lastActivate        string
+	lastUsage           string
+	lastRenameInput     app.RenameInput
+	lastAuto            bool
 	lastDoctorCalled    bool
 	lastRefreshSelector string
 
