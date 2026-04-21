@@ -69,10 +69,12 @@ jobs:
           rm -rf dist
           mkdir -p dist
           LDFLAGS="-s -w -X github.com/prakersh/codexmultiauth/cmd.Version=${VERSION} -X github.com/prakersh/codexmultiauth/cmd.Commit=${COMMIT} -X github.com/prakersh/codexmultiauth/cmd.Date=${DATE}"
-          for target in "darwin arm64" "darwin amd64" "linux amd64" "linux arm64"; do
+          for target in "darwin arm64" "darwin amd64" "linux amd64" "linux arm64" "windows amd64" "windows arm64"; do
             os="${target%% *}"
             arch="${target##* }"
-            out="dist/cma_${VERSION}_${os}_${arch}"
+            ext=""
+            if [ "${os}" = "windows" ]; then ext=".exe"; fi
+            out="dist/cma_${VERSION}_${os}_${arch}${ext}"
             echo "building ${out}"
             CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build -ldflags "${LDFLAGS}" -o "${out}" .
           done
