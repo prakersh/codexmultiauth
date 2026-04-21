@@ -16,6 +16,7 @@ type Paths struct {
 	VaultKeyFile string
 	BackupDir    string
 	LockDir      string
+	TornFile     string
 	CodexHome    string
 	CodexAuth    string
 }
@@ -46,6 +47,7 @@ func Resolve() (Paths, error) {
 		VaultKeyFile: filepath.Join(configDir, "vault.key.v1"),
 		BackupDir:    filepath.Join(configDir, "backups"),
 		LockDir:      filepath.Join(configDir, "locks"),
+		TornFile:     filepath.Join(configDir, "state.torn"),
 		CodexHome:    codexHome,
 		CodexAuth:    filepath.Join(codexHome, "auth.json"),
 	}, nil

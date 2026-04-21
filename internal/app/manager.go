@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +66,10 @@ type Manager struct {
 	tokenRefresher TokenRefresher
 	now            func() time.Time
 	newID          func() string
+
+	// Per-account refresh serialization. See ensureFreshAuth.
+	refreshMuGuard sync.Mutex
+	refreshMuMap   map[string]*sync.Mutex
 }
 
 func NewManager(
@@ -100,6 +105,9 @@ func (m *Manager) SetTokenRefresher(refresher TokenRefresher) {
 }
 
 func (m *Manager) withMutationLock(ctx context.Context, fn func() error) error {
+	if err := m.checkTornState(); err != nil {
+		return err
+	}
 	lockPath := m.paths.LockDir + "/cma.lock"
 	lock, err := m.lockManager.Acquire(ctx, lockPath)
 	if err != nil {
@@ -107,6 +115,42 @@ func (m *Manager) withMutationLock(ctx context.Context, fn func() error) error {
 	}
 	defer func() { _ = lock.Unlock() }()
 	return fn()
+}
+
+// ErrTornState is returned when a prior mutation left state and vault in an
+// inconsistent state that automatic rollback could not repair. The user must
+// run `cma doctor` to re-verify and clear the flag before any further
+// mutations are accepted.
+var ErrTornState = errors.New("state and vault are in an inconsistent (torn) state; run `cma doctor` to verify and recover")
+
+func (m *Manager) checkTornState() error {
+	if m.paths.TornFile == "" {
+		return nil
+	}
+	if _, err := os.Stat(m.paths.TornFile); err == nil {
+		return ErrTornState
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("check torn-state marker %s: %w", m.paths.TornFile, err)
+	}
+	return nil
+}
+
+func (m *Manager) markTornState(cause error) {
+	if m.paths.TornFile == "" {
+		return
+	}
+	payload := fmt.Sprintf("torn at %s\n%v\n", m.now().Format(time.RFC3339Nano), cause)
+	_ = cmafs.WriteFileAtomic(m.paths.TornFile, []byte(payload), cmafs.AtomicWriteOptions{Mode: cmafs.FileMode})
+}
+
+func (m *Manager) clearTornState() error {
+	if m.paths.TornFile == "" {
+		return nil
+	}
+	if err := os.Remove(m.paths.TornFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear torn-state marker %s: %w", m.paths.TornFile, err)
+	}
+	return nil
 }
 
 func (m *Manager) loadStateAndVault(ctx context.Context) (domain.State, store.Vault, []byte, error) {
@@ -135,13 +179,19 @@ func (m *Manager) commitStateAndVault(state domain.State, vault store.Vault, key
 		return err
 	}
 
+	// Save vault (data) first, then state (index). This ordering ensures
+	// that any state entry published to disk is backed by vault data that is
+	// already on disk — the dangerous direction is a state pointer to a
+	// missing vault row, not an inert vault entry without a pointer.
 	if err := m.vaultRepo.Save(vault, key); err != nil {
 		return err
 	}
 	if err := m.stateRepo.Save(state); err != nil {
 		rollbackErr := restoreOptionalFile(m.paths.VaultFile, originalVault, vaultExists)
 		if rollbackErr != nil {
-			return errors.Join(err, rollbackErr)
+			joined := errors.Join(err, rollbackErr)
+			m.markTornState(joined)
+			return joined
 		}
 		return err
 	}
@@ -149,7 +199,66 @@ func (m *Manager) commitStateAndVault(state domain.State, vault store.Vault, key
 	if err := verifyStateAndVault(m.stateRepo, m.vaultRepo, key, state, vault); err != nil {
 		restoreStateErr := restoreOptionalFile(m.paths.StateFile, originalState, stateExists)
 		restoreVaultErr := restoreOptionalFile(m.paths.VaultFile, originalVault, vaultExists)
-		return errors.Join(err, restoreStateErr, restoreVaultErr)
+		if restoreStateErr != nil || restoreVaultErr != nil {
+			joined := errors.Join(err, restoreStateErr, restoreVaultErr)
+			m.markTornState(joined)
+			return joined
+		}
+		return err
+	}
+	return nil
+}
+
+// Doctor inspects on-disk state and vault for consistency. If they verify
+// cleanly, it clears any torn-state marker left by a prior failed rollback
+// and returns a human-readable status string. Callers should not hold the
+// mutation lock when invoking Doctor — it performs its own consistency
+// check and takes the lock only while clearing the marker.
+func (m *Manager) Doctor(ctx context.Context) (string, error) {
+	key, _, err := m.keyManager.LoadOrCreate(ctx)
+	if err != nil {
+		return "", fmt.Errorf("doctor: load key: %w", err)
+	}
+	state, err := m.stateRepo.Load()
+	if err != nil {
+		return "", fmt.Errorf("doctor: load state: %w", err)
+	}
+	vault, err := m.vaultRepo.Load(key)
+	if err != nil {
+		return "", fmt.Errorf("doctor: load vault: %w", err)
+	}
+	if err := checkStateVaultInvariants(state, vault); err != nil {
+		return "", fmt.Errorf("doctor: %w", err)
+	}
+	if err := m.clearTornState(); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("ok: %d account(s), %d vault entry(ies)", len(state.Accounts), len(vault.Entries)), nil
+}
+
+func checkStateVaultInvariants(state domain.State, vault store.Vault) error {
+	vaultIDs := map[string]struct{}{}
+	for _, entry := range vault.Entries {
+		vaultIDs[entry.AccountID] = struct{}{}
+	}
+	for _, account := range state.Accounts {
+		if _, ok := vaultIDs[account.ID]; !ok {
+			return fmt.Errorf("state references account %q with no vault entry", account.ID)
+		}
+	}
+	stateIDs := map[string]struct{}{}
+	for _, account := range state.Accounts {
+		stateIDs[account.ID] = struct{}{}
+	}
+	for _, entry := range vault.Entries {
+		if _, ok := stateIDs[entry.AccountID]; !ok {
+			return fmt.Errorf("vault contains orphan entry for account %q", entry.AccountID)
+		}
+	}
+	if state.ActiveAccountID != "" {
+		if _, ok := stateIDs[state.ActiveAccountID]; !ok {
+			return fmt.Errorf("active account %q not present in state", state.ActiveAccountID)
+		}
 	}
 	return nil
 }

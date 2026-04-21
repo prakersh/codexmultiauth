@@ -26,6 +26,8 @@ type service interface {
 	Activate(ctx context.Context, selector string) (domain.Account, error)
 	Delete(ctx context.Context, input app.DeleteInput) error
 	Rename(ctx context.Context, input app.RenameInput) error
+	Doctor(ctx context.Context) (string, error)
+	Refresh(ctx context.Context, selector string) ([]app.RefreshResult, error)
 }
 
 func newManager() (*app.Manager, error) {

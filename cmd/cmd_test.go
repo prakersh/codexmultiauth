@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -36,8 +37,14 @@ type fakeService struct {
 	lastUsage        string
 	lastRenameInput  app.RenameInput
 	lastAuto         bool
+	lastDoctorCalled    bool
+	lastRefreshSelector string
 
-	autoResult domain.Account
+	autoResult     domain.Account
+	doctorResult   string
+	doctorErr      error
+	refreshResults []app.RefreshResult
+	refreshErr     error
 }
 
 func (f *fakeService) List(ctx context.Context) ([]app.ListedAccount, error) { return f.listed, nil }
@@ -80,6 +87,14 @@ func (f *fakeService) Delete(ctx context.Context, input app.DeleteInput) error {
 func (f *fakeService) Rename(ctx context.Context, input app.RenameInput) error {
 	f.lastRenameInput = input
 	return nil
+}
+func (f *fakeService) Doctor(ctx context.Context) (string, error) {
+	f.lastDoctorCalled = true
+	return f.doctorResult, f.doctorErr
+}
+func (f *fakeService) Refresh(ctx context.Context, selector string) ([]app.RefreshResult, error) {
+	f.lastRefreshSelector = selector
+	return f.refreshResults, f.refreshErr
 }
 
 func TestPromptHelpersAndSplitAliases(t *testing.T) {
@@ -314,7 +329,11 @@ func TestCommandWorkflows(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, output, "Imported 1 account(s)")
 	require.Equal(t, []string{"1"}, svc.lastRestoreInput.Selected)
-	require.Equal(t, domain.ConflictRename, svc.lastRestoreInput.Decisions["1"])
+	require.Equal(t, app.RestoreDecision{
+		Policy:             domain.ConflictRename,
+		ExpectedReason:     "display_name",
+		ExpectedExistingID: "existing-1",
+	}, svc.lastRestoreInput.Decisions["1"])
 
 	output, err = runCommand(newRestoreCmd(), "--allow-plain-pass-arg", "--conflict", "ask", "secret", "named")
 	require.NoError(t, err)
@@ -324,6 +343,40 @@ func TestCommandWorkflows(t *testing.T) {
 	output, err = runCommand(newTUICmd())
 	require.NoError(t, err)
 	require.Empty(t, output)
+
+	// doctor: service method is invoked and its status is written verbatim.
+	svc.doctorResult = "ok: 2 account(s), 2 vault entry(ies)"
+	output, err = runCommand(newDoctorCmd())
+	require.NoError(t, err)
+	require.Contains(t, output, "ok: 2 account(s)")
+	require.True(t, svc.lastDoctorCalled)
+
+	// refresh all: selector passes through, summary is printed, no error when
+	// every result succeeds.
+	svc.refreshResults = []app.RefreshResult{
+		{Account: domain.Account{DisplayName: "work"}, Refreshed: true},
+		{Account: domain.Account{DisplayName: "personal"}, Refreshed: false},
+	}
+	output, err = runCommand(newRefreshCmd(), "all")
+	require.NoError(t, err)
+	require.Equal(t, "all", svc.lastRefreshSelector)
+	require.Contains(t, output, "work: refreshed")
+	require.Contains(t, output, "personal: no change")
+	require.Contains(t, output, "Refreshed 1, unchanged 1, failed 0")
+
+	// refresh <selector>: selector passes through verbatim.
+	output, err = runCommand(newRefreshCmd(), "work")
+	require.NoError(t, err)
+	require.Equal(t, "work", svc.lastRefreshSelector)
+
+	// refresh: per-account error surfaces in output and the command returns
+	// a non-nil error.
+	svc.refreshResults = []app.RefreshResult{
+		{Account: domain.Account{DisplayName: "work"}, Err: fmt.Errorf("refresh failed")},
+	}
+	output, err = runCommand(newRefreshCmd(), "work")
+	require.Error(t, err)
+	require.Contains(t, output, "work: error: refresh failed")
 }
 
 func TestLoginCommand_DoesNotPromptForOptionalAliases(t *testing.T) {

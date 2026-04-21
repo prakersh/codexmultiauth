@@ -15,7 +15,7 @@ type RestoreInput struct {
 	All        bool
 	Selected   []string
 	Conflict   domain.ConflictPolicy
-	Decisions  map[string]domain.ConflictPolicy
+	Decisions  map[string]RestoreDecision
 }
 
 type RestoreSummary struct {

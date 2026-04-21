@@ -35,7 +35,7 @@ func newRestoreCmd() *cobra.Command {
 				Source:     args[1],
 				All:        all,
 				Conflict:   policy,
-				Decisions:  map[string]domain.ConflictPolicy{},
+				Decisions:  map[string]app.RestoreDecision{},
 			}
 			artifact, candidates, err := manager.InspectBackup(input)
 			if err != nil {
@@ -75,7 +75,11 @@ func newRestoreCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					input.Decisions[candidate.Account.ID] = decision
+					input.Decisions[candidate.Account.ID] = app.RestoreDecision{
+						Policy:             decision,
+						ExpectedReason:     candidate.Conflict.Reason,
+						ExpectedExistingID: candidate.Conflict.Existing.ID,
+					}
 				}
 			}
 

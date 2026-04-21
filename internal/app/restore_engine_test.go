@@ -98,8 +98,8 @@ func TestApplyRestore_DecisionOverridesAndUnsupportedPolicy(t *testing.T) {
 		},
 	}
 
-	nextState, nextVault, imported, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictSkip, map[string]domain.ConflictPolicy{
-		"acc-2": domain.ConflictOverwrite,
+	nextState, nextVault, imported, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictSkip, map[string]app.RestoreDecision{
+		"acc-2": {Policy: domain.ConflictOverwrite, ExpectedReason: "display_name", ExpectedExistingID: "acc-1"},
 	}, func() time.Time { return now })
 	require.NoError(t, err)
 	require.Equal(t, 2, imported)
@@ -108,6 +108,85 @@ func TestApplyRestore_DecisionOverridesAndUnsupportedPolicy(t *testing.T) {
 
 	_, _, _, err = app.ApplyRestore(state, store.Vault{}, candidates[:1], domain.ConflictPolicy("broken"), nil, func() time.Time { return now })
 	require.Error(t, err)
+}
+
+func TestApplyRestore_StaleDecisionReasonFallsThroughToPolicy(t *testing.T) {
+	now := time.Now().UTC()
+	state := domain.State{
+		Accounts: []domain.Account{
+			{ID: "acc-1", DisplayName: "work", Fingerprint: "fp-1", CreatedAt: now},
+		},
+	}
+	candidates := []app.RestoreCandidate{
+		{
+			Account:  domain.Account{ID: "acc-2", DisplayName: "other", Fingerprint: "fp-1", CreatedAt: now},
+			Payload:  []byte(`{"tokens":{}}`),
+			Conflict: &app.RestoreConflict{Existing: state.Accounts[0], Reason: "fingerprint"},
+		},
+	}
+
+	// Decision was recorded against a display_name conflict, but re-analysis
+	// now reports a fingerprint conflict. Decision must be ignored and the
+	// policy (ConflictAsk) takes over — which errors asking the user to
+	// re-run restore interactively.
+	_, _, _, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictAsk, map[string]app.RestoreDecision{
+		"acc-2": {Policy: domain.ConflictOverwrite, ExpectedReason: "display_name", ExpectedExistingID: "acc-1"},
+	}, func() time.Time { return now })
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interactive conflict resolution required")
+}
+
+func TestApplyRestore_StaleDecisionExistingIDFallsThroughToPolicy(t *testing.T) {
+	now := time.Now().UTC()
+	state := domain.State{
+		Accounts: []domain.Account{
+			{ID: "acc-different", DisplayName: "work", Fingerprint: "fp-1", CreatedAt: now},
+		},
+	}
+	candidates := []app.RestoreCandidate{
+		{
+			Account:  domain.Account{ID: "acc-2", DisplayName: "work", Fingerprint: "fp-2", CreatedAt: now},
+			Payload:  []byte(`{"tokens":{}}`),
+			Conflict: &app.RestoreConflict{Existing: state.Accounts[0], Reason: "display_name"},
+		},
+	}
+
+	// Decision expected to conflict with ExpectedExistingID "acc-1" but the
+	// actual conflicting existing account is "acc-different". Decision must
+	// be ignored.
+	_, _, _, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictAsk, map[string]app.RestoreDecision{
+		"acc-2": {Policy: domain.ConflictOverwrite, ExpectedReason: "display_name", ExpectedExistingID: "acc-1"},
+	}, func() time.Time { return now })
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interactive conflict resolution required")
+}
+
+func TestApplyRestore_MatchingDecisionIsHonoured(t *testing.T) {
+	now := time.Now().UTC()
+	state := domain.State{
+		Accounts: []domain.Account{
+			{ID: "acc-1", DisplayName: "work", Fingerprint: "fp-1", CreatedAt: now},
+		},
+	}
+	candidates := []app.RestoreCandidate{
+		{
+			Account:  domain.Account{ID: "acc-2", DisplayName: "work", Fingerprint: "fp-2", CreatedAt: now},
+			Payload:  []byte(`{"tokens":{}}`),
+			Conflict: &app.RestoreConflict{Existing: state.Accounts[0], Reason: "display_name"},
+		},
+	}
+
+	// Decision matches the re-detected conflict (reason + existing ID) —
+	// must be applied instead of the fallback policy.
+	nextState, _, imported, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictSkip, map[string]app.RestoreDecision{
+		"acc-2": {Policy: domain.ConflictOverwrite, ExpectedReason: "display_name", ExpectedExistingID: "acc-1"},
+	}, func() time.Time { return now })
+	require.NoError(t, err)
+	require.Equal(t, 1, imported)
+	require.Len(t, nextState.Accounts, 1)
+	// Overwrite replaces acc-1 with acc-2's content but keeps acc-1's ID.
+	require.Equal(t, "acc-1", nextState.Accounts[0].ID)
+	require.Equal(t, "fp-2", nextState.Accounts[0].Fingerprint)
 }
 
 func TestAnalyzeRestoreDetectsConflictReasons(t *testing.T) {

@@ -31,6 +31,24 @@ func (m *Manager) Rename(ctx context.Context, input RenameInput) error {
 			return err
 		}
 
+		if account.DisplayName == input.NewName {
+			return nil
+		}
+
+		for _, other := range state.Accounts {
+			if other.ID == account.ID {
+				continue
+			}
+			if other.DisplayName == input.NewName {
+				return fmt.Errorf("account %q already exists", input.NewName)
+			}
+			for _, alias := range other.Aliases {
+				if alias == input.NewName {
+					return fmt.Errorf("account %q is already used as an alias of %q", input.NewName, other.DisplayName)
+				}
+			}
+		}
+
 		account.DisplayName = input.NewName
 
 		for i, a := range state.Accounts {

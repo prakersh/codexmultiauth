@@ -20,6 +20,19 @@ type RestoreConflict struct {
 	Reason   string
 }
 
+// RestoreDecision captures a user's conflict-resolution choice along with the
+// conflict signature (reason + the conflicting existing account's ID) it was
+// made against. Re-analysing the state at apply time may yield a different
+// conflict signature for the same incoming account if a concurrent mutation
+// landed in between; in that case the recorded decision is ignored and the
+// caller's fallback policy is used instead. This prevents a decision made
+// about one conflict from being silently applied to a different one.
+type RestoreDecision struct {
+	Policy             domain.ConflictPolicy
+	ExpectedReason     string
+	ExpectedExistingID string
+}
+
 func AnalyzeRestore(state domain.State, artifact backup.Plaintext) []RestoreCandidate {
 	candidates := make([]RestoreCandidate, 0, len(artifact.Accounts))
 	for _, account := range artifact.Accounts {
@@ -38,7 +51,7 @@ func AnalyzeRestore(state domain.State, artifact backup.Plaintext) []RestoreCand
 	return candidates
 }
 
-func ApplyRestore(state domain.State, vault store.Vault, candidates []RestoreCandidate, policy domain.ConflictPolicy, decisions map[string]domain.ConflictPolicy, now func() time.Time) (domain.State, store.Vault, int, error) {
+func ApplyRestore(state domain.State, vault store.Vault, candidates []RestoreCandidate, policy domain.ConflictPolicy, decisions map[string]RestoreDecision, now func() time.Time) (domain.State, store.Vault, int, error) {
 	imported := 0
 	for _, candidate := range candidates {
 		account := candidate.Account
@@ -60,7 +73,16 @@ func ApplyRestore(state domain.State, vault store.Vault, candidates []RestoreCan
 
 		effectivePolicy := policy
 		if decided, ok := decisions[candidate.Account.ID]; ok {
-			effectivePolicy = decided
+			// Only honour the user's prior decision if the conflict it was
+			// made about still matches the conflict we re-detected. If the
+			// state changed between inspect and apply so that the reason or
+			// the conflicting existing account differs, fall through to the
+			// caller's fallback policy (typically ConflictAsk, which then
+			// errors and asks the user to re-run restore).
+			if decided.ExpectedReason == candidate.Conflict.Reason &&
+				decided.ExpectedExistingID == candidate.Conflict.Existing.ID {
+				effectivePolicy = decided.Policy
+			}
 		}
 
 		switch effectivePolicy {

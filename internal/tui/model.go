@@ -47,7 +47,7 @@ type model struct {
 	restoreConflictQueue  []app.RestoreCandidate
 	restoreConflictIndex  int
 	restoreConflictChoice int
-	restoreDecisions      map[string]domain.ConflictPolicy
+	restoreDecisions      map[string]app.RestoreDecision
 }
 
 type Service interface {
@@ -269,7 +269,7 @@ func (m *model) beginRestoreReview(msg inspectMsg) {
 	m.restoreConflictQueue = nil
 	m.restoreConflictIndex = 0
 	m.restoreConflictChoice = 0
-	m.restoreDecisions = map[string]domain.ConflictPolicy{}
+	m.restoreDecisions = map[string]app.RestoreDecision{}
 	m.message = fmt.Sprintf("Loaded %d backup account(s)", len(msg.candidates))
 }
 
@@ -315,11 +315,11 @@ func cycleConflictPolicy(current domain.ConflictPolicy) domain.ConflictPolicy {
 	return options[0]
 }
 
-func copyDecisions(in map[string]domain.ConflictPolicy) map[string]domain.ConflictPolicy {
+func copyDecisions(in map[string]app.RestoreDecision) map[string]app.RestoreDecision {
 	if len(in) == 0 {
-		return map[string]domain.ConflictPolicy{}
+		return map[string]app.RestoreDecision{}
 	}
-	out := make(map[string]domain.ConflictPolicy, len(in))
+	out := make(map[string]app.RestoreDecision, len(in))
 	for key, value := range in {
 		out[key] = value
 	}

@@ -129,7 +129,11 @@ func TestRestoreWorkflowSupportsInteractiveConflictDecision(t *testing.T) {
 	require.Equal(t, 1, svc.restoreCalls)
 	require.Equal(t, []string{"1", "2"}, svc.lastRestoreInput.Selected)
 	require.Equal(t, domain.ConflictAsk, svc.lastRestoreInput.Conflict)
-	require.Equal(t, domain.ConflictSkip, svc.lastRestoreInput.Decisions["1"])
+	require.Equal(t, app.RestoreDecision{
+		Policy:             domain.ConflictSkip,
+		ExpectedReason:     "display_name",
+		ExpectedExistingID: "existing-1",
+	}, svc.lastRestoreInput.Decisions["1"])
 	require.Equal(t, "Imported 1 account(s)", m.message)
 }
 

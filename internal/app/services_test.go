@@ -279,15 +279,28 @@ func TestBackupInspectRestoreAndConflictDecisions(t *testing.T) {
 
 	manager2, authStore2, _ := newTestManager(t)
 	authStore2.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"seed","refresh_token":"seed","account_id":"seed"}}`), domain.AuthStoreFile)
-	_, err = manager2.Save(ctx, SaveInput{DisplayName: "work"})
+	existing, err := manager2.Save(ctx, SaveInput{DisplayName: "work"})
 	require.NoError(t, err)
+
+	// Inspect on manager2 to capture the actual conflict signature we need to
+	// put into the decision so it survives re-validation at apply time.
+	_, candidates2, err := manager2.InspectBackup(RestoreInput{Passphrase: []byte("secret"), Source: backupPath})
+	require.NoError(t, err)
+	require.Len(t, candidates2, 1)
+	require.NotNil(t, candidates2[0].Conflict)
 
 	summary, err := manager2.Restore(ctx, RestoreInput{
 		Passphrase: []byte("secret"),
 		Source:     backupPath,
 		All:        true,
 		Conflict:   domain.ConflictAsk,
-		Decisions:  map[string]domain.ConflictPolicy{saved.Account.ID: domain.ConflictRename},
+		Decisions: map[string]RestoreDecision{
+			saved.Account.ID: {
+				Policy:             domain.ConflictRename,
+				ExpectedReason:     candidates2[0].Conflict.Reason,
+				ExpectedExistingID: existing.Account.ID,
+			},
+		},
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, summary.Imported)

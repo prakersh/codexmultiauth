@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"sync"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
@@ -16,11 +15,6 @@ type UsageResult struct {
 	Account domain.Account
 	Usage   domain.UsageSummary
 	Info    UsageAccountInfo
-}
-
-type usageAuthUpdate struct {
-	Payload     []byte
-	Fingerprint string
 }
 
 type UsageAccountInfo struct {
@@ -43,7 +37,6 @@ func (m *Manager) Usage(ctx context.Context, selector string) ([]UsageResult, er
 	activeAccountID := m.activeAccountID(ctx, state)
 
 	results := make([]UsageResult, len(accounts))
-	updates := make(map[string]usageAuthUpdate)
 	var wg sync.WaitGroup
 	var firstErr error
 	var mu sync.Mutex
@@ -52,42 +45,34 @@ func (m *Manager) Usage(ctx context.Context, selector string) ([]UsageResult, er
 		wg.Add(1)
 		go func(i int, account domain.Account) {
 			defer wg.Done()
-			entry, ok := findVaultEntry(vault, account.ID)
-			if !ok {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = errors.New("vault entry missing for usage")
-				}
-				mu.Unlock()
-				return
-			}
-			auth, _, err := store.NormalizeAndValidateAuth(entry.Payload)
-			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-				return
-			}
 
-			if m.tokenRefresher != nil {
-				refreshed, changed, refreshErr := m.tokenRefresher.MaybeRefresh(ctx, auth)
-				if refreshErr == nil && changed {
-					payload, fingerprint, canonicalErr := canonicalizeAuth(refreshed)
-					if canonicalErr != nil {
-						mu.Lock()
-						if firstErr == nil {
-							firstErr = canonicalErr
-						}
-						mu.Unlock()
-						return
-					}
-					auth = refreshed
+			// Resolve the auth for this account through the single
+			// refresh-and-persist path so concurrent usage calls never
+			// double-refresh and callers outside Usage share the same logic.
+			auth, _, refreshErr := m.ensureFreshAuth(ctx, account.ID, freshAuthIfExpiring)
+			if refreshErr != nil {
+				// Fall back to on-disk auth on refresh failure so usage can
+				// still report best-effort data; only surface a hard error
+				// if we couldn't even read the on-disk entry.
+				entry, ok := findVaultEntry(vault, account.ID)
+				if !ok {
 					mu.Lock()
-					updates[account.ID] = usageAuthUpdate{Payload: payload, Fingerprint: fingerprint}
+					if firstErr == nil {
+						firstErr = errors.New("vault entry missing for usage")
+					}
 					mu.Unlock()
+					return
 				}
+				fallback, _, parseErr := store.NormalizeAndValidateAuth(entry.Payload)
+				if parseErr != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = parseErr
+					}
+					mu.Unlock()
+					return
+				}
+				auth = fallback
 			}
 
 			summary := infrausage.BestEffortSummary(auth)
@@ -114,72 +99,7 @@ func (m *Manager) Usage(ctx context.Context, selector string) ([]UsageResult, er
 	if firstErr != nil {
 		return nil, firstErr
 	}
-	if err := m.persistUsageAuthUpdates(ctx, updates); err != nil {
-		return nil, err
-	}
 	return results, nil
-}
-
-func (m *Manager) persistUsageAuthUpdates(ctx context.Context, updates map[string]usageAuthUpdate) error {
-	if len(updates) == 0 {
-		return nil
-	}
-
-	return m.withMutationLock(ctx, func() error {
-		state, vault, key, err := m.loadStateAndVault(ctx)
-		if err != nil {
-			return err
-		}
-
-		applicable := make(map[string]usageAuthUpdate, len(updates))
-		for i, entry := range vault.Entries {
-			update, ok := updates[entry.AccountID]
-			if !ok {
-				continue
-			}
-			vault.Entries[i].Payload = update.Payload
-			vault.Entries[i].Fingerprint = update.Fingerprint
-			vault.Entries[i].SavedAt = m.now()
-			applicable[entry.AccountID] = update
-		}
-		if len(applicable) == 0 {
-			return nil
-		}
-
-		for i, account := range state.Accounts {
-			if update, ok := applicable[account.ID]; ok {
-				state.Accounts[i].Fingerprint = update.Fingerprint
-			}
-		}
-
-		activeUpdate, hasActiveUpdate := applicable[state.ActiveAccountID]
-		var originalAuth store.AuthRecord
-		originalAuthExists := false
-		if hasActiveUpdate {
-			currentAuth, loadErr := m.authStore.Load(ctx)
-			if loadErr == nil {
-				originalAuth = currentAuth
-				originalAuthExists = true
-			} else if !errors.Is(loadErr, os.ErrNotExist) {
-				return loadErr
-			}
-
-			if err := m.authStore.Save(ctx, activeUpdate.Payload); err != nil {
-				return err
-			}
-		}
-
-		if err := m.commitStateAndVault(state, vault, key); err != nil {
-			if hasActiveUpdate {
-				rollbackErr := rollbackAuth(ctx, m.authStore, originalAuthExists, originalAuth.Canonical)
-				if rollbackErr != nil {
-					return errors.Join(err, rollbackErr)
-				}
-			}
-			return err
-		}
-		return nil
-	})
 }
 
 func canonicalizeAuth(auth store.CodexAuth) ([]byte, string, error) {

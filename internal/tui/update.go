@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/prakersh/codexmultiauth/internal/app"
 	"github.com/prakersh/codexmultiauth/internal/domain"
 )
 
@@ -190,7 +191,7 @@ func (m model) updateRestoreReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.restoreConflictQueue = m.selectedRestoreConflicts()
 			m.restoreConflictIndex = 0
 			m.restoreConflictChoice = 0
-			m.restoreDecisions = map[string]domain.ConflictPolicy{}
+			m.restoreDecisions = map[string]app.RestoreDecision{}
 			if len(m.restoreConflictQueue) > 0 {
 				m.mode = modeRestoreConflict
 				return m, nil
@@ -224,9 +225,16 @@ func (m model) updateRestoreConflict(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		current := m.restoreConflictQueue[m.restoreConflictIndex]
 		if m.restoreDecisions == nil {
-			m.restoreDecisions = map[string]domain.ConflictPolicy{}
+			m.restoreDecisions = map[string]app.RestoreDecision{}
 		}
-		m.restoreDecisions[current.Account.ID] = conflictChoiceAt(m.restoreConflictChoice)
+		decision := app.RestoreDecision{
+			Policy: conflictChoiceAt(m.restoreConflictChoice),
+		}
+		if current.Conflict != nil {
+			decision.ExpectedReason = current.Conflict.Reason
+			decision.ExpectedExistingID = current.Conflict.Existing.ID
+		}
+		m.restoreDecisions[current.Account.ID] = decision
 		if m.restoreConflictIndex < len(m.restoreConflictQueue)-1 {
 			m.restoreConflictIndex++
 			m.restoreConflictChoice = 0

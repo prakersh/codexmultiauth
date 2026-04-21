@@ -29,6 +29,8 @@ func newRootCmd() *cobra.Command {
 		newRenameCmd(),
 		newBackupCmd(),
 		newRestoreCmd(),
+		newDoctorCmd(),
+		newRefreshCmd(),
 		newTUICmd(),
 	)
 

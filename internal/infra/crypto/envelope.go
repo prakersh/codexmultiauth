@@ -1,7 +1,6 @@
 package crypto
 
 import (
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -134,7 +133,7 @@ func DecryptWithPassphrase(envelope Envelope, passphrase []byte) ([]byte, error)
 	if envelope.KDF == nil {
 		return nil, errors.New("decrypt with passphrase: envelope missing kdf metadata")
 	}
-	if subtle.ConstantTimeEq(int32(len(passphrase)), 0) == 1 {
+	if len(passphrase) == 0 {
 		return nil, errors.New("decrypt with passphrase: empty passphrase")
 	}
 	if envelope.KDF.Name != KDFNameArgon2id {
