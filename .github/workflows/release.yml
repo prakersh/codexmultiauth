@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. v0.0.6"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CMA_DISABLE_KEYRING: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test ./... -race -count=1
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="$(tr -d '[:space:]' < cmd/VERSION)"
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ "$TAG" != "v${VERSION}" ]; then
+            echo "::error::tag ($TAG) does not match cmd/VERSION (v${VERSION}). Bump cmd/VERSION and re-tag."
+            exit 1
+          fi
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}"   >> "$GITHUB_OUTPUT"
+          echo "date=${DATE}"       >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT:  ${{ steps.meta.outputs.commit }}
+          DATE:    ${{ steps.meta.outputs.date }}
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          LDFLAGS="-s -w -X github.com/prakersh/codexmultiauth/cmd.Version=${VERSION} -X github.com/prakersh/codexmultiauth/cmd.Commit=${COMMIT} -X github.com/prakersh/codexmultiauth/cmd.Date=${DATE}"
+          for target in "darwin arm64" "darwin amd64" "linux amd64" "linux arm64"; do
+            os="${target%% *}"
+            arch="${target##* }"
+            out="dist/cma_${VERSION}_${os}_${arch}"
+            echo "building ${out}"
+            CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build -ldflags "${LDFLAGS}" -o "${out}" .
+          done
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum cma_* > sha256sums.txt
+          cat sha256sums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG:     ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Idempotent re-runs: drop any pre-existing release for this tag.
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" \
+            dist/cma_* dist/sha256sums.txt \
+            --title "cma ${VERSION}" \
+            --generate-notes
