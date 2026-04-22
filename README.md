@@ -39,20 +39,47 @@ If you use multiple Codex accounts, setup is usually easy. Repeated switching is
 
 ## Requirements
 
-- Go `1.24.2`
 - `codex` CLI on `PATH` (required for `cma login`)
 - Optional OS keyring support (CMA falls back to file key storage when needed)
+- Go `1.24.2` only if building from source
 
-## Quick start
+## Install
 
-### 1) Build
+### macOS / Linux (one liner, auto-detects OS and arch)
+
+```bash
+REPO=prakersh/codexmultiauth
+TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+VERSION=${TAG#v}
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
+curl -fsSL -o cma "https://github.com/${REPO}/releases/download/${TAG}/cma_${VERSION}_${OS}_${ARCH}"
+chmod +x cma
+sudo mv cma /usr/local/bin/cma
+cma version --short
+```
+
+### Verify the download (optional)
+
+```bash
+curl -fsSL -O "https://github.com/${REPO}/releases/download/${TAG}/sha256sums.txt"
+shasum -a 256 -c sha256sums.txt --ignore-missing
+```
+
+### Windows
+
+Download `cma_<version>_windows_amd64.exe` (or `_arm64.exe`) from the [latest release](https://github.com/prakersh/codexmultiauth/releases/latest), rename it to `cma.exe`, and place it on your `PATH`.
+
+### From source
 
 ```bash
 go build -o cma .
 ./cma --help
 ```
 
-### 2) Save and switch accounts
+## Quick start
+
+### 1) Save and switch accounts
 
 ```bash
 # Save current Codex account (encrypted)
@@ -68,7 +95,7 @@ go build -o cma .
 ./cma auto
 ```
 
-### 3) Check usage and limits
+### 2) Check usage and limits
 
 ```bash
 # Usage for one account
@@ -84,7 +111,7 @@ go build -o cma .
 ./cma auto
 ```
 
-### 4) Backup and restore
+### 3) Backup and restore
 
 ```bash
 # Encrypted backup (interactive passphrase prompt)
@@ -97,13 +124,13 @@ go build -o cma .
 ./cma restore prompt weekly-backup --all --conflict overwrite
 ```
 
-### 5) Launch the TUI
+### 4) Launch the TUI
 
 ```bash
 ./cma tui
 ```
 
-### 6) Watch limits and auto-rotate when quotas change
+### 5) Watch limits and auto-rotate when quotas change
 
 ```bash
 # Poll `cma limits` every 300 seconds and run `cma auto` when the
