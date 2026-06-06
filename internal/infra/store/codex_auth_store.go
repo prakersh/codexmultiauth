@@ -135,9 +135,10 @@ func (s *CodexAuthStore) Save(ctx context.Context, raw []byte) error {
 	}
 
 	if s.shouldAttemptKeyring() {
-		if err := s.keyring.Set(CodexAuthKeyringService, CodexAuthKeyringAccount, canonical); err != nil {
-			return fmt.Errorf("save auth to keyring: %w", err)
-		}
+		// Best-effort mirror. The auth file written above is the source of truth
+		// (Load reads it first), so a missing or unavailable keyring backend must
+		// not fail the save.
+		_ = s.keyring.Set(CodexAuthKeyringService, CodexAuthKeyringAccount, canonical)
 	}
 	return nil
 }

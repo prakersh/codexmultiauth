@@ -126,17 +126,34 @@ func TestCodexAuthStore_ConfigAndErrorPaths(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func TestCodexAuthStore_SaveDeleteErrors(t *testing.T) {
+func TestCodexAuthStore_SaveToleratesKeyringFailure(t *testing.T) {
 	p := testenv.NewWithDisableKeyring(t, "").Paths
 
-	ring := &fakeKeyring{setErr: errors.New("boom")}
+	ring := &fakeKeyring{setErr: errors.New("Specified keyring backend not available")}
 	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
-	err := authStore.Save(context.Background(), authFixture())
-	require.Error(t, err)
+	require.NoError(t, authStore.Save(context.Background(), authFixture()))
+
+	written, err := os.ReadFile(p.CodexAuth)
+	require.NoError(t, err)
+	_, canonical, err := store.NormalizeAndValidateAuth(written)
+	require.NoError(t, err)
+	_, expected, err := store.NormalizeAndValidateAuth(authFixture())
+	require.NoError(t, err)
+	require.Equal(t, store.FingerprintAuth(expected), store.FingerprintAuth(canonical))
+
+	record, err := authStore.Load(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, domain.AuthStoreFile, record.StoreKind)
+}
+
+func TestCodexAuthStore_DeleteErrors(t *testing.T) {
+	p := testenv.NewWithDisableKeyring(t, "").Paths
+
+	ring := &fakeKeyring{}
+	authStore := store.NewCodexAuthStore(p, ring, store.NewConfigRepo(p))
 
 	require.NoError(t, os.RemoveAll(p.CodexHome))
 	require.NoError(t, os.MkdirAll(p.CodexAuth, cmafs.DirMode))
 	require.NoError(t, os.WriteFile(filepath.Join(p.CodexAuth, "child"), []byte("x"), cmafs.FileMode))
-	err = authStore.Delete(context.Background())
-	require.Error(t, err)
+	require.Error(t, authStore.Delete(context.Background()))
 }

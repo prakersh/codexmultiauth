@@ -144,12 +144,3 @@ func rollbackAtomicWrite(path string, existed bool, originalData []byte, mode os
 	}
 	return nil
 }
-
-func syncDir(path string) error {
-	dir, err := openDirFile(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
