@@ -79,9 +79,11 @@ func TestClientFetchMissingAccessToken(t *testing.T) {
 
 func TestStatusHelpers(t *testing.T) {
 	require.Equal(t, "5-Hour Limit", displayName("five_hour"))
-	require.Equal(t, "Weekly All-Model", displayName("seven_day"))
+	require.Equal(t, "Weekly Limit", displayName("weekly"))
+	require.Equal(t, "Monthly Limit", displayName("monthly"))
+	require.Equal(t, "3-Day Limit", displayName("3_day"))
 	require.Equal(t, "Review Requests", displayName("code_review"))
-	require.Equal(t, "custom", displayName("custom"))
+	require.Equal(t, "Custom", displayName("custom"))
 	require.Equal(t, "healthy", statusFromPercent(10))
 	require.Equal(t, "warning", statusFromPercent(60))
 	require.Equal(t, "danger", statusFromPercent(85))
@@ -187,8 +189,16 @@ func TestParseResponseAdditionalBranches(t *testing.T) {
 	require.NotNil(t, summary.CreditsLeft)
 	require.Equal(t, 12.5, *summary.CreditsLeft)
 
-	resp := response{RateLimit: rateLimit{PrimaryWindow: &window{LimitWindowSeconds: 7 * 24 * 60 * 60}}}
-	require.Equal(t, "seven_day", primaryName(resp))
+	// Both rate_limit windows are 7 days here, so the second is suffixed
+	// instead of dropped; the 1-day code review window sorts ahead of them.
+	require.Equal(t, "code_review", summary.Quotas[0].Name)
+	require.Equal(t, "weekly", summary.Quotas[1].Name)
+	require.Equal(t, "weekly_2", summary.Quotas[2].Name)
+
+	require.Equal(t, "weekly", windowName(&window{LimitWindowSeconds: 7 * 24 * 60 * 60}, ""))
+	require.Equal(t, "monthly", windowName(&window{LimitWindowSeconds: 30 * 24 * 60 * 60}, ""))
+	require.Equal(t, "five_hour", windowName(&window{LimitWindowSeconds: 5 * 60 * 60}, ""))
+	require.Equal(t, "five_hour", windowName(&window{}, "five_hour"))
 }
 
 func TestParseResponseProliteStringCreditsBalance(t *testing.T) {
@@ -206,7 +216,7 @@ func TestParseResponseProliteStringCreditsBalance(t *testing.T) {
 	require.NotNil(t, summary.CreditsLeft)
 	require.Equal(t, 0.0, *summary.CreditsLeft)
 	require.Equal(t, "five_hour", summary.Quotas[0].Name)
-	require.Equal(t, "seven_day", summary.Quotas[1].Name)
+	require.Equal(t, "weekly", summary.Quotas[1].Name)
 	require.NotNil(t, summary.Quotas[0].ResetsAt)
 	require.NotNil(t, summary.Quotas[1].ResetsAt)
 }
@@ -337,4 +347,170 @@ func buildJWT(t *testing.T, payload map[string]any) string {
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
 	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body) + ".sig"
+}
+
+// TestParseResponseFreePlanMonthlyWindow covers the current free-plan shape:
+// a single 30-day primary window and no secondary window.
+func TestParseResponseFreePlanMonthlyWindow(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"free",
+		"rate_limit":{
+			"allowed":true,
+			"limit_reached":false,
+			"primary_window":{"used_percent":0,"limit_window_seconds":2592000,"reset_after_seconds":2592000,"reset_at":1789852672},
+			"secondary_window":null
+		},
+		"code_review_rate_limit":null,
+		"additional_rate_limits":null,
+		"credits":{"has_credits":false,"unlimited":false,"balance":null}
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, "free", summary.PlanType)
+	require.False(t, summary.LimitReached)
+	require.Len(t, summary.Quotas, 1)
+	require.Equal(t, "monthly", summary.Quotas[0].Name)
+	require.Equal(t, "Monthly Limit", summary.Quotas[0].DisplayName)
+	require.Equal(t, int64(2592000), summary.Quotas[0].WindowSeconds)
+	require.NotNil(t, summary.Quotas[0].ResetsAt)
+	require.Nil(t, summary.CreditsLeft)
+}
+
+// TestParseResponsePaidPlanWeeklyOnly covers the current paid-plan shape after
+// the 5-hour window was removed: a single 7-day primary window.
+func TestParseResponsePaidPlanWeeklyOnly(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"plus",
+		"rate_limit":{
+			"allowed":true,
+			"primary_window":{"used_percent":42.5,"limit_window_seconds":604800,"reset_at":1900000000},
+			"secondary_window":null
+		}
+	}`))
+	require.NoError(t, err)
+	require.Len(t, summary.Quotas, 1)
+	require.Equal(t, "weekly", summary.Quotas[0].Name)
+	require.Equal(t, "Weekly Limit", summary.Quotas[0].DisplayName)
+	require.Equal(t, int64(604800), summary.Quotas[0].WindowSeconds)
+}
+
+// TestParseResponseLimitReached checks the blocked-account signals the API
+// exposes alongside the windows.
+func TestParseResponseLimitReached(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"free",
+		"rate_limit":{"allowed":false,"limit_reached":true,"primary_window":{"used_percent":100,"limit_window_seconds":2592000,"reset_at":1900000000}},
+		"rate_limit_reached_type":"monthly"
+	}`))
+	require.NoError(t, err)
+	require.True(t, summary.LimitReached)
+	require.Equal(t, "critical", summary.Quotas[0].Status)
+}
+
+// TestParseResponseSortsShortestWindowFirst keeps the most immediately binding
+// limit leftmost for renderers.
+func TestParseResponseSortsShortestWindowFirst(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"rate_limit":{
+			"primary_window":{"used_percent":1,"limit_window_seconds":2592000,"reset_at":1900000000},
+			"secondary_window":{"used_percent":2,"limit_window_seconds":18000,"reset_at":1900000000}
+		}
+	}`))
+	require.NoError(t, err)
+	require.Len(t, summary.Quotas, 2)
+	require.Equal(t, "five_hour", summary.Quotas[0].Name)
+	require.Equal(t, "monthly", summary.Quotas[1].Name)
+}
+
+// TestParseResponseAdditionalRateLimitsShapes ensures an unfamiliar
+// additional_rate_limits payload never fails the whole parse.
+func TestParseResponseAdditionalRateLimitsShapes(t *testing.T) {
+	keyed, err := ParseResponse([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"additional_rate_limits":{"cloud_tasks":{"used_percent":30,"limit_window_seconds":86400,"reset_at":1900000000}}
+	}`))
+	require.NoError(t, err)
+	require.Len(t, keyed.Quotas, 2)
+	// The map key names the quota so it stays distinguishable from the
+	// windows the main rate_limit block reports.
+	require.Equal(t, "cloud_tasks", keyed.Quotas[0].Name)
+	require.Equal(t, domain.QuotaCategoryOther, keyed.Quotas[0].Category)
+
+	listed, err := ParseResponse([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"additional_rate_limits":[{"used_percent":30,"limit_window_seconds":86400,"reset_at":1900000000}]
+	}`))
+	require.NoError(t, err)
+	require.Len(t, listed.Quotas, 2)
+
+	junk, err := ParseResponse([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"additional_rate_limits":"unexpected"
+	}`))
+	require.NoError(t, err)
+	require.Len(t, junk.Quotas, 1)
+}
+
+// TestParseResponseLegacyWindowsWithoutLength falls back to slot position when
+// the API omits limit_window_seconds, as older payloads did.
+func TestParseResponseLegacyWindowsWithoutLength(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"rate_limit":{
+			"primary_window":{"used_percent":10,"reset_at":1900000000},
+			"secondary_window":{"used_percent":20,"reset_at":1900000500}
+		}
+	}`))
+	require.NoError(t, err)
+	require.Len(t, summary.Quotas, 2)
+	require.Equal(t, "five_hour", summary.Quotas[0].Name)
+	require.Equal(t, "weekly", summary.Quotas[1].Name)
+}
+
+// TestParseResponseRejectsWindowlessAdditionalLimits guards against minting a
+// quota from a JSON object that carries no window fields. Decoding
+// permissively reported "0.0% used, healthy" for a limit whose real usage sat
+// under an unrecognized key.
+func TestParseResponseRejectsWindowlessAdditionalLimits(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"additional_rate_limits":{"gpt5_codex":{"primary_window":{"used_percent":95,"limit_window_seconds":604800}}}
+	}`))
+	require.NoError(t, err)
+	require.Len(t, summary.Quotas, 1)
+	require.Equal(t, "weekly", summary.Quotas[0].Name)
+}
+
+// TestParseResponseTagsQuotaCategories keeps review limits distinguishable
+// from the limits that gate model usage.
+func TestParseResponseTagsQuotaCategories(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"code_review_rate_limit":{"primary_window":{"used_percent":80,"limit_window_seconds":86400,"reset_at":1900000000}}
+	}`))
+	require.NoError(t, err)
+	require.Len(t, summary.Quotas, 2)
+	byName := map[string]domain.UsageQuota{}
+	for _, quota := range summary.Quotas {
+		byName[quota.Name] = quota
+	}
+	require.Equal(t, domain.QuotaCategoryModel, byName["weekly"].Category)
+	require.True(t, byName["weekly"].IsModelLimit())
+	require.Equal(t, domain.QuotaCategoryCodeReview, byName["code_review"].Category)
+	require.False(t, byName["code_review"].IsModelLimit())
+}
+
+// TestWindowNameToleratesTierDrift keeps accounts on the same tier in one
+// column when the API reports a 31-day calendar month or a slightly off window.
+func TestWindowNameToleratesTierDrift(t *testing.T) {
+	require.Equal(t, "monthly", windowName(&window{LimitWindowSeconds: 31 * 24 * 60 * 60}, ""))
+	require.Equal(t, "monthly", windowName(&window{LimitWindowSeconds: 28 * 24 * 60 * 60}, ""))
+	require.Equal(t, "weekly", windowName(&window{LimitWindowSeconds: 6 * 24 * 60 * 60}, ""))
+	require.Equal(t, "five_hour", windowName(&window{LimitWindowSeconds: 6 * 60 * 60}, ""))
+	require.Equal(t, "90_day", windowName(&window{LimitWindowSeconds: 90 * 24 * 60 * 60}, ""))
+}
+
+// TestDisplayNameHandlesNonASCIISlug covers labels derived from arbitrary
+// additional_rate_limits keys.
+func TestDisplayNameHandlesNonASCIISlug(t *testing.T) {
+	require.Equal(t, "Über", displayName("über"))
+	require.Equal(t, "Cloud Tasks", displayName("cloud_tasks"))
 }

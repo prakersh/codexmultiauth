@@ -98,7 +98,7 @@ All mutating flows use the same safety model:
 ### Auto activation
 
 1. fetch usage for all saved accounts
-2. identify 5-hour and weekly quota entries
-3. score each account from remaining quota and reset urgency
-4. prefer the highest combined score, then higher raw headroom, then earlier resets
+2. read whatever limit windows each account reports (Codex issues a monthly window on free plans and a weekly window on paid plans)
+3. score each account from remaining quota and reset urgency, weighting each window by its own length
+4. prefer the highest average score, then higher raw headroom on the longest window, then earlier resets
 5. activate the winning account through the normal activation flow

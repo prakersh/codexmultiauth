@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -353,4 +354,78 @@ type fakeProgram struct {
 
 func (f fakeProgram) Run() (tea.Model, error) {
 	return f.run()
+}
+
+// TestUsageViewRendersReportedWindowsOnly checks the TUI lists whatever limit
+// windows an account reports rather than assuming a fixed 5-hour/weekly pair.
+// A free account reports only a monthly window and a paid account only a
+// weekly one.
+func TestUsageViewRendersReportedWindowsOnly(t *testing.T) {
+	monthlyReset := time.Date(2026, 9, 20, 2, 50, 0, 0, time.Local)
+	weeklyReset := time.Date(2026, 8, 28, 3, 19, 0, 0, time.Local)
+	zero, used := 0.0, 42.5
+
+	m := model{
+		input: textInput(),
+		usage: []app.UsageResult{
+			{
+				Account: domain.Account{DisplayName: "p7free"},
+				Usage: domain.UsageSummary{
+					Confidence: domain.UsageConfidenceConfirmed,
+					PlanType:   "free",
+					Quotas: []domain.UsageQuota{{
+						Name: "monthly", DisplayName: "Monthly Limit",
+						WindowSeconds: 2592000, UsedPercent: &zero, ResetsAt: &monthlyReset,
+					}},
+				},
+			},
+			{
+				Account: domain.Account{DisplayName: "paid"},
+				Usage: domain.UsageSummary{
+					Confidence: domain.UsageConfidenceConfirmed,
+					PlanType:   "plus",
+					Quotas: []domain.UsageQuota{{
+						Name: "weekly", DisplayName: "Weekly Limit",
+						WindowSeconds: 604800, UsedPercent: &used, ResetsAt: &weeklyReset,
+					}},
+				},
+			},
+		},
+	}
+
+	view := m.View()
+	require.Contains(t, view, "Monthly Limit: 0.0% resets Sep 20 02:50")
+	require.Contains(t, view, "Weekly Limit: 42.5% resets Aug 28 03:19")
+	require.Contains(t, view, "plan: free")
+	require.NotContains(t, view, "5-Hour")
+}
+
+// TestUsageViewWithoutQuotas keeps the panel informative when the API returned
+// no limit windows for an account.
+func TestUsageViewWithoutQuotas(t *testing.T) {
+	m := model{
+		input: textInput(),
+		usage: []app.UsageResult{{
+			Account: domain.Account{DisplayName: "acct"},
+			Usage:   domain.UsageSummary{Confidence: domain.UsageConfidenceBestEffort, PlanType: "free"},
+		}},
+	}
+	require.Contains(t, m.View(), "No limit windows reported")
+}
+
+// TestUsageViewEmptyStateWhenNoPercentages covers windows that arrive without a
+// usage percentage: the panel must say so rather than show a bare header.
+func TestUsageViewEmptyStateWhenNoPercentages(t *testing.T) {
+	m := model{
+		input: textInput(),
+		usage: []app.UsageResult{{
+			Account: domain.Account{DisplayName: "acct"},
+			Usage: domain.UsageSummary{
+				Confidence: domain.UsageConfidenceConfirmed,
+				PlanType:   "free",
+				Quotas:     []domain.UsageQuota{{Name: "monthly", DisplayName: "Monthly Limit"}},
+			},
+		}},
+	}
+	require.Contains(t, m.View(), "No limit windows reported")
 }

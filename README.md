@@ -290,7 +290,7 @@ This prevents false precision when no stable machine-readable quota source is av
 
 ## Auto selection
 
-`cma auto` scores each saved account from the remaining 5-hour and weekly quota headroom, then increases the weight of quota that resets sooner. This lets a weekly bucket that resets tomorrow beat a small 5-hour advantage on another account when that is the better quota to burn next.
+`cma auto` scores each saved account from the headroom left on whatever limit windows Codex reports for it, then increases the weight of quota that resets sooner. Codex no longer issues a 5-hour window: free plans report a single monthly window and paid plans report a weekly one, so CMA reads the window length from the API instead of assuming a fixed set. This lets a bucket that resets tomorrow beat a small advantage on another account when that is the better quota to burn next.
 
 ## Documentation map
 

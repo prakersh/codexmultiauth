@@ -82,10 +82,13 @@ Choose and activate the best saved account automatically.
 
 Selection uses an urgency-weighted quota score:
 
-- more remaining 5-hour quota helps
-- more remaining weekly quota helps
-- quota that resets sooner gets extra weight
-- ties fall back to raw remaining quota, then earlier resets
+- more remaining quota on any reported window helps
+- quota that resets sooner gets extra weight, scaled to that window's length
+- ties fall back to raw remaining quota on the longest window, then earlier resets
+
+Codex reports a monthly window on free plans and a weekly window on paid plans;
+the 5-hour window is no longer issued. CMA reads the window length from the API,
+so accounts on different plans are scored on whatever windows they actually have.
 
 ```bash
 cma auto

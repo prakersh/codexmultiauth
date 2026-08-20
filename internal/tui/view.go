@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (m model) View() string {
@@ -36,11 +37,33 @@ func (m model) View() string {
 		builder.WriteString("  Press u to fetch usage for the selected account\n")
 	}
 	for _, usage := range m.usage {
-		builder.WriteString(fmt.Sprintf("  %s [%s]\n", usage.Account.DisplayName, usage.Usage.Confidence))
+		header := fmt.Sprintf("  %s [%s]", usage.Account.DisplayName, usage.Usage.Confidence)
+		if usage.Usage.PlanType != "" {
+			header += " plan: " + usage.Usage.PlanType
+		}
+		if usage.Usage.LimitReached {
+			header += " limit reached"
+		}
+		builder.WriteString(header + "\n")
+		// Quota rows come straight from whatever windows the API reported, so
+		// plans with only a monthly or only a weekly limit render correctly
+		// without the view assuming a fixed set of windows.
+		rendered := 0
 		for _, quota := range usage.Usage.Quotas {
-			if quota.UsedPercent != nil {
-				builder.WriteString(fmt.Sprintf("    %s: %.1f%%\n", quota.DisplayName, *quota.UsedPercent))
+			if quota.UsedPercent == nil {
+				continue
 			}
+			line := fmt.Sprintf("    %s: %.1f%%", quota.DisplayName, *quota.UsedPercent)
+			if quota.ResetsAt != nil && !quota.ResetsAt.IsZero() {
+				line += " resets " + quota.ResetsAt.In(time.Local).Format("Jan 02 15:04")
+			}
+			builder.WriteString(line + "\n")
+			rendered++
+		}
+		// Counts rows actually written, not quotas received: windows can
+		// arrive without a percentage and would otherwise leave a bare header.
+		if rendered == 0 {
+			builder.WriteString("    No limit windows reported\n")
 		}
 	}
 	if m.message != "" {

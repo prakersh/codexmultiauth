@@ -125,3 +125,104 @@ func autoFloatPtr(value float64) *float64 {
 func autoTimePtr(value time.Time) *time.Time {
 	return &value
 }
+
+// TestSelectAutoActivationScoresSingleWindowPlans covers the current Codex
+// shapes: a free account reports only a monthly window and a paid account only
+// a weekly one. The account with more headroom must win even though the two
+// report different window kinds.
+func TestSelectAutoActivationScoresSingleWindowPlans(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	results := []UsageResult{
+		{
+			Account: domain.Account{ID: "freeacct", DisplayName: "freeacct"},
+			Usage:   singleWindowSummary("monthly", "Monthly Limit", 30*24*60*60, 90, fixedNow.AddDate(0, 0, 20)),
+		},
+		{
+			Account: domain.Account{ID: "paidacct", DisplayName: "paidacct"},
+			Usage:   singleWindowSummary("weekly", "Weekly Limit", 7*24*60*60, 5, fixedNow.AddDate(0, 0, 5)),
+		},
+	}
+
+	selected, err := selectAutoActivation(results, fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, "paidacct", selected.Account.ID)
+}
+
+// TestSelectAutoActivationSingleWindowNotPenalizedAgainstTwoWindows ensures a
+// one-window plan is not outranked purely because another account reports more
+// windows at the same headroom.
+func TestSelectAutoActivationSingleWindowNotPenalizedAgainstTwoWindows(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	single := singleWindowSummary("weekly", "Weekly Limit", 7*24*60*60, 10, fixedNow.AddDate(0, 0, 5))
+	legacy := autoUsageSummary(60, fixedNow.Add(4*time.Hour), 60, fixedNow.AddDate(0, 0, 5))
+
+	results := []UsageResult{
+		{Account: domain.Account{ID: "legacy", DisplayName: "legacy"}, Usage: legacy},
+		{Account: domain.Account{ID: "single", DisplayName: "single"}, Usage: single},
+	}
+
+	selected, err := selectAutoActivation(results, fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, "single", selected.Account.ID)
+}
+
+func singleWindowSummary(name, display string, windowSeconds int64, used float64, resetsAt time.Time) domain.UsageSummary {
+	return domain.UsageSummary{
+		Confidence: domain.UsageConfidenceConfirmed,
+		Quotas: []domain.UsageQuota{{
+			Name:          name,
+			DisplayName:   display,
+			WindowSeconds: windowSeconds,
+			UsedPercent:   autoFloatPtr(used),
+			ResetsAt:      autoTimePtr(resetsAt),
+		}},
+	}
+}
+
+// TestSelectAutoActivationIgnoresCodeReviewQuota reproduces the regression the
+// review caught: an exhausted review-request quota must not make an account
+// with more model headroom lose to one with less.
+func TestSelectAutoActivationIgnoresCodeReviewQuota(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	roomy := autoUsageSummary(0, fixedNow.Add(4*time.Hour), 0, fixedNow.AddDate(0, 0, 5))
+	roomy.Quotas[0].Category = domain.QuotaCategoryModel
+	roomy.Quotas[1].Category = domain.QuotaCategoryModel
+	roomy.Quotas = append(roomy.Quotas, domain.UsageQuota{
+		Name: "code_review", DisplayName: "Review Requests",
+		Category: domain.QuotaCategoryCodeReview, WindowSeconds: 86400,
+		UsedPercent: autoFloatPtr(100), ResetsAt: autoTimePtr(fixedNow.AddDate(0, 0, 1)),
+	})
+
+	busier := autoUsageSummary(30, fixedNow.Add(4*time.Hour), 30, fixedNow.AddDate(0, 0, 5))
+
+	results := []UsageResult{
+		{Account: domain.Account{ID: "busier", DisplayName: "busier"}, Usage: busier},
+		{Account: domain.Account{ID: "roomy", DisplayName: "roomy"}, Usage: roomy},
+	}
+
+	selected, err := selectAutoActivation(results, fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, "roomy", selected.Account.ID)
+}
+
+// TestSelectAutoActivationSkipsBlockedAccount keeps auto off an account the API
+// reports as rate limited even when its reported windows still show headroom.
+func TestSelectAutoActivationSkipsBlockedAccount(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	blocked := autoUsageSummary(0, fixedNow.Add(4*time.Hour), 0, fixedNow.AddDate(0, 0, 5))
+	blocked.LimitReached = true
+
+	results := []UsageResult{
+		{Account: domain.Account{ID: "blocked", DisplayName: "blocked"}, Usage: blocked},
+		{Account: domain.Account{ID: "usable", DisplayName: "usable"},
+			Usage: autoUsageSummary(70, fixedNow.Add(4*time.Hour), 70, fixedNow.AddDate(0, 0, 5))},
+	}
+
+	selected, err := selectAutoActivation(results, fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, "usable", selected.Account.ID)
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ var errNoSavedAccounts = errors.New("no saved accounts")
 const (
 	autoFiveHourWindow = 5 * time.Hour
 	autoWeeklyWindow   = 7 * 24 * time.Hour
+	autoMonthlyWindow  = 30 * 24 * time.Hour
 	autoMinRemaining   = time.Minute
 	autoScoreTolerance = 1e-9
 )
@@ -48,28 +50,23 @@ func selectAutoActivation(results []UsageResult, now time.Time) (UsageResult, er
 }
 
 func compareAutoCandidates(left, right UsageResult, now time.Time) int {
+	// An account the API reports as blocked is unusable now, whatever headroom
+	// its reported windows show; the limit that tripped may be one it does not
+	// report back to us.
+	if left.Usage.LimitReached != right.Usage.LimitReached {
+		if right.Usage.LimitReached {
+			return -1
+		}
+		return 1
+	}
+
 	leftScore := scoreAutoCandidate(left, now)
 	rightScore := scoreAutoCandidate(right, now)
 
 	if diff := compareAutoScoreValue(leftScore.total, rightScore.total); diff != 0 {
 		return diff
 	}
-	if diff := compareAutoScoreValue(leftScore.weeklyScore, rightScore.weeklyScore); diff != 0 {
-		return diff
-	}
-	if diff := compareAutoScoreValue(leftScore.fiveHourScore, rightScore.fiveHourScore); diff != 0 {
-		return diff
-	}
-	if diff := compareAutoScoreValue(leftScore.weeklyAvailable, rightScore.weeklyAvailable); diff != 0 {
-		return diff
-	}
-	if diff := compareAutoScoreValue(leftScore.fiveHourAvailable, rightScore.fiveHourAvailable); diff != 0 {
-		return diff
-	}
-	if diff := compareAutoResetPoints(leftScore.weeklyReset, rightScore.weeklyReset); diff != 0 {
-		return diff
-	}
-	if diff := compareAutoResetPoints(leftScore.fiveHourReset, rightScore.fiveHourReset); diff != 0 {
+	if diff := compareAutoQuotaScores(leftScore, rightScore); diff != 0 {
 		return diff
 	}
 	if diff := compareAutoScoreValue(leftScore.knownQuotaCount, rightScore.knownQuotaCount); diff != 0 {
@@ -81,15 +78,25 @@ func compareAutoCandidates(left, right UsageResult, now time.Time) int {
 	return strings.Compare(left.Account.ID, right.Account.ID)
 }
 
+// autoCandidateScore summarizes an account's remaining headroom. Codex no
+// longer gives every plan the same window shape (free accounts report a single
+// monthly window, paid accounts a weekly one), so scoring walks whatever
+// windows an account actually reports instead of looking for a fixed 5h/weekly
+// pair.
 type autoCandidateScore struct {
-	total             float64
-	weeklyScore       float64
-	fiveHourScore     float64
-	weeklyAvailable   float64
-	fiveHourAvailable float64
-	knownQuotaCount   float64
-	weeklyReset       autoResetPoint
-	fiveHourReset     autoResetPoint
+	total           float64
+	knownQuotaCount float64
+	// quotas are ordered longest window first, so tie-breaking compares the
+	// scarcest, slowest-refilling limit before shorter ones.
+	quotas []autoQuotaScore
+}
+
+type autoQuotaScore struct {
+	windowSeconds int64
+	score         float64
+	available     float64
+	known         bool
+	reset         autoResetPoint
 }
 
 type autoResetPoint struct {
@@ -98,22 +105,59 @@ type autoResetPoint struct {
 }
 
 func scoreAutoCandidate(result UsageResult, now time.Time) autoCandidateScore {
-	fiveHourMetric := autoQuotaMetricFor(result.Usage.Quotas, autoQuotaFiveHour)
-	weeklyMetric := autoQuotaMetricFor(result.Usage.Quotas, autoQuotaWeekly)
+	metrics := autoQuotaMetrics(result.Usage.Quotas)
 
-	fiveHourScore, fiveHourAvailable, fiveHourKnown, fiveHourReset := scoreAutoQuota(fiveHourMetric, now, autoFiveHourWindow)
-	weeklyScore, weeklyAvailable, weeklyKnown, weeklyReset := scoreAutoQuota(weeklyMetric, now, autoWeeklyWindow)
-
-	return autoCandidateScore{
-		total:             weeklyScore + fiveHourScore,
-		weeklyScore:       weeklyScore,
-		fiveHourScore:     fiveHourScore,
-		weeklyAvailable:   weeklyAvailable,
-		fiveHourAvailable: fiveHourAvailable,
-		knownQuotaCount:   boolToFloat(weeklyKnown) + boolToFloat(fiveHourKnown),
-		weeklyReset:       weeklyReset,
-		fiveHourReset:     fiveHourReset,
+	score := autoCandidateScore{quotas: make([]autoQuotaScore, 0, len(metrics))}
+	var sum float64
+	for _, metric := range metrics {
+		quotaScore, available, known, reset := scoreAutoQuota(metric, now, metric.window)
+		score.quotas = append(score.quotas, autoQuotaScore{
+			windowSeconds: int64(metric.window / time.Second),
+			score:         quotaScore,
+			available:     available,
+			known:         known,
+			reset:         reset,
+		})
+		if known {
+			sum += quotaScore
+			score.knownQuotaCount++
+		}
 	}
+
+	// Averaging rather than summing keeps accounts comparable when they report
+	// different numbers of windows; a plan with two windows should not outrank
+	// an equally healthy plan that only reports one.
+	if score.knownQuotaCount > 0 {
+		score.total = sum / score.knownQuotaCount
+	}
+
+	sort.SliceStable(score.quotas, func(i, j int) bool {
+		return score.quotas[i].windowSeconds > score.quotas[j].windowSeconds
+	})
+	return score
+}
+
+func compareAutoQuotaScores(left, right autoCandidateScore) int {
+	count := len(left.quotas)
+	if len(right.quotas) < count {
+		count = len(right.quotas)
+	}
+	for i := 0; i < count; i++ {
+		if diff := compareAutoScoreValue(left.quotas[i].score, right.quotas[i].score); diff != 0 {
+			return diff
+		}
+	}
+	for i := 0; i < count; i++ {
+		if diff := compareAutoScoreValue(left.quotas[i].available, right.quotas[i].available); diff != 0 {
+			return diff
+		}
+	}
+	for i := 0; i < count; i++ {
+		if diff := compareAutoResetPoints(left.quotas[i].reset, right.quotas[i].reset); diff != 0 {
+			return diff
+		}
+	}
+	return 0
 }
 
 func scoreAutoQuota(metric autoQuotaMetric, now time.Time, window time.Duration) (score, available float64, known bool, reset autoResetPoint) {
@@ -128,8 +172,11 @@ func scoreAutoQuota(metric autoQuotaMetric, now time.Time, window time.Duration)
 	score = available
 	known = true
 
-	if !metric.hasResetAt {
-		return score, available, known, autoResetPoint{}
+	if !metric.hasResetAt || window <= 0 {
+		if metric.hasResetAt {
+			reset = autoResetPoint{known: true, at: metric.resetAt}
+		}
+		return score, available, known, reset
 	}
 
 	reset = autoResetPoint{known: true, at: metric.resetAt}
@@ -148,27 +195,24 @@ func scoreAutoQuota(metric autoQuotaMetric, now time.Time, window time.Duration)
 	return score, available, known, reset
 }
 
-type autoQuotaKind int
-
-const (
-	autoQuotaFiveHour autoQuotaKind = iota
-	autoQuotaWeekly
-)
-
 type autoQuotaMetric struct {
 	hasUsedPercent bool
 	usedPercent    float64
 	hasResetAt     bool
 	resetAt        time.Time
+	window         time.Duration
 }
 
-func autoQuotaMetricFor(quotas []domain.UsageQuota, kind autoQuotaKind) autoQuotaMetric {
+// autoQuotaMetrics keeps only the limits that gate model usage. A spent
+// review-request or other feature quota must not make an account look busier
+// than it is for the purpose of choosing where to run next.
+func autoQuotaMetrics(quotas []domain.UsageQuota) []autoQuotaMetric {
+	metrics := make([]autoQuotaMetric, 0, len(quotas))
 	for _, quota := range quotas {
-		if !matchesAutoQuotaKind(quota, kind) {
+		if !quota.IsModelLimit() || isNonModelQuotaName(quota) {
 			continue
 		}
-
-		metric := autoQuotaMetric{}
+		metric := autoQuotaMetric{window: autoQuotaWindow(quota)}
 		if quota.UsedPercent != nil {
 			metric.hasUsedPercent = true
 			metric.usedPercent = *quota.UsedPercent
@@ -177,23 +221,41 @@ func autoQuotaMetricFor(quotas []domain.UsageQuota, kind autoQuotaKind) autoQuot
 			metric.hasResetAt = true
 			metric.resetAt = quota.ResetsAt.UTC()
 		}
-		return metric
+		metrics = append(metrics, metric)
 	}
-	return autoQuotaMetric{}
+	return metrics
 }
 
-func matchesAutoQuotaKind(quota domain.UsageQuota, kind autoQuotaKind) bool {
-	nameLower := strings.ToLower(quota.Name)
-	displayLower := strings.ToLower(quota.DisplayName)
-
-	switch kind {
-	case autoQuotaFiveHour:
-		return containsFiveHourQuota(nameLower) || containsFiveHourQuota(displayLower)
-	case autoQuotaWeekly:
-		return strings.Contains(nameLower, "weekly") || strings.Contains(displayLower, "weekly")
-	default:
-		return false
+// autoQuotaWindow prefers the window length the API reported and falls back to
+// reading it off the quota label, so summaries produced before WindowSeconds
+// existed still score with the right urgency weighting.
+func autoQuotaWindow(quota domain.UsageQuota) time.Duration {
+	if quota.WindowSeconds > 0 {
+		return time.Duration(quota.WindowSeconds) * time.Second
 	}
+	for _, value := range []string{strings.ToLower(quota.Name), strings.ToLower(quota.DisplayName)} {
+		switch {
+		case containsFiveHourQuota(value):
+			return autoFiveHourWindow
+		case strings.Contains(value, "weekly") || strings.Contains(value, "seven_day") || strings.Contains(value, "7_day"):
+			return autoWeeklyWindow
+		case strings.Contains(value, "monthly") || strings.Contains(value, "30_day"):
+			return autoMonthlyWindow
+		}
+	}
+	return 0
+}
+
+// isNonModelQuotaName catches review quotas in summaries built before the
+// Category field existed, matching the quota kinds the previous scorer
+// deliberately ignored.
+func isNonModelQuotaName(quota domain.UsageQuota) bool {
+	for _, value := range []string{strings.ToLower(quota.Name), strings.ToLower(quota.DisplayName)} {
+		if strings.Contains(value, "code_review") || strings.Contains(value, "review request") {
+			return true
+		}
+	}
+	return false
 }
 
 func containsFiveHourQuota(value string) bool {
@@ -237,11 +299,4 @@ func clampPercent(value float64) float64 {
 	default:
 		return value
 	}
-}
-
-func boolToFloat(value bool) float64 {
-	if value {
-		return 1
-	}
-	return 0
 }
