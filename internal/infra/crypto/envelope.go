@@ -143,13 +143,46 @@ func DecryptWithPassphrase(envelope Envelope, passphrase []byte) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("decode salt: %w", err)
 	}
-	key := DeriveKey(passphrase, salt, Argon2idParams{
+	// KDF parameters come from the file, which is unauthenticated at this
+	// point: DecryptWithPassphrase has to derive the key before it can verify
+	// anything. argon2.IDKey panics outright on zero iterations or
+	// parallelism, and honors Memory literally, so a corrupted or hostile
+	// backup could crash the process or drive a multi-terabyte allocation.
+	params := Argon2idParams{
 		Memory:      envelope.KDF.Memory,
 		Iterations:  envelope.KDF.Iterations,
 		Parallelism: envelope.KDF.Parallelism,
 		KeyLength:   envelope.KDF.KeyLength,
-	})
+	}
+	if err := validateKDFParams(params); err != nil {
+		return nil, err
+	}
+	key := DeriveKey(passphrase, salt, params)
 	return DecryptWithKey(envelope, key)
+}
+
+// Ceilings for KDF parameters read from a file. The upper bounds are far above
+// anything Default() produces, so they reject absurd values without
+// constraining a legitimately expensive envelope.
+const (
+	maxKDFMemory      = 4 << 20 // 4 GiB, expressed in KiB
+	maxKDFIterations  = 64
+	maxKDFParallelism = 64
+	maxKDFKeyLength   = 1 << 10
+)
+
+func validateKDFParams(params Argon2idParams) error {
+	switch {
+	case params.Iterations < 1 || params.Iterations > maxKDFIterations:
+		return fmt.Errorf("invalid kdf iterations %d", params.Iterations)
+	case params.Parallelism < 1 || params.Parallelism > maxKDFParallelism:
+		return fmt.Errorf("invalid kdf parallelism %d", params.Parallelism)
+	case params.Memory < 8 || params.Memory > maxKDFMemory:
+		return fmt.Errorf("invalid kdf memory %d", params.Memory)
+	case params.KeyLength < 16 || params.KeyLength > maxKDFKeyLength:
+		return fmt.Errorf("invalid kdf key length %d", params.KeyLength)
+	}
+	return nil
 }
 
 func MarshalEnvelope(envelope Envelope) ([]byte, error) {

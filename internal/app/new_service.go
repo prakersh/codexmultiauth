@@ -31,7 +31,22 @@ func (m *Manager) New(ctx context.Context, input NewInput) (SaveResult, error) {
 		return SaveResult{}, err
 	}
 
-	result, err := m.Save(ctx, SaveInput{DisplayName: input.DisplayName, Aliases: input.Aliases})
+	// Login rewrote ~/.codex/auth.json without the mutation lock held, because
+	// an interactive browser flow can take minutes and holding the lock would
+	// block every other command. Pin what it produced instead: without this, a
+	// concurrent `cma activate` landing in the gap would make Save store the
+	// pre-existing account under the new name and silently drop the
+	// credentials that were just logged in.
+	expect := ""
+	if record, loadErr := m.authStore.Load(ctx); loadErr == nil {
+		expect = record.Fingerprint
+	}
+
+	result, err := m.Save(ctx, SaveInput{
+		DisplayName:       input.DisplayName,
+		Aliases:           input.Aliases,
+		ExpectFingerprint: expect,
+	})
 	if err != nil {
 		if rollbackErr := rollbackAuth(ctx, m.authStore, originalExists, original); rollbackErr != nil {
 			return SaveResult{}, errors.Join(err, rollbackErr)

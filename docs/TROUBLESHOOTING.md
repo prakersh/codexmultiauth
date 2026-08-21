@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## `cma login` or `cma new` fails with `codex CLI runner is not configured`
+## `cma login` or `cma new` fails with `executable file not found in $PATH`
 
 Cause:
 
@@ -46,7 +46,8 @@ Fix:
 - use `prompt` for manual entry
 - verify `env:VAR` is set and non-empty
 - verify `hash:<hex>` is valid hex
-- use `pass:<literal>` or a bare literal only with `--allow-plain-pass-arg`
+- use `hash:<hex>`, `pass:<literal>`, or a bare literal only with `--allow-plain-pass-arg`; all three place the passphrase in the process argument list
+- a passphrase containing `:` cannot be a bare literal, because the leading text is read as a source name; use `pass:<literal>` or `env:VAR`
 
 ## Selector is ambiguous or not found
 

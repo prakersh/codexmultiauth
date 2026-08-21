@@ -14,22 +14,29 @@ func newSaveCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "save",
+		Args:  cobra.NoArgs,
 		Short: "Save the current Codex auth into the encrypted vault",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, err := newService()
 			if err != nil {
 				return err
 			}
-			if name == "" {
-				name, err = promptText("Account name (optional)", "")
-				if err != nil {
-					return err
+			// Both values are optional, so skip the questions entirely when
+			// there is no terminal. `cma save --name work` under cron or with
+			// stdin redirected used to block on the aliases prompt and then
+			// fail with a bare EOF.
+			if interactive() {
+				if !cmd.Flags().Changed("name") {
+					name, err = promptText("Account name (optional)", "")
+					if err != nil {
+						return err
+					}
 				}
-			}
-			if aliases == "" {
-				aliases, err = promptText("Aliases (comma-separated, optional)", "")
-				if err != nil {
-					return err
+				if !cmd.Flags().Changed("aliases") {
+					aliases, err = promptText("Aliases (comma-separated, optional)", "")
+					if err != nil {
+						return err
+					}
 				}
 			}
 			result, err := manager.Save(context.Background(), app.SaveInput{

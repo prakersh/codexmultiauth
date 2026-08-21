@@ -13,6 +13,19 @@ import (
 
 var errNoSavedAccounts = errors.New("no saved accounts")
 
+var errNoUsageData = errors.New("no usage data available for any account; cannot choose on quota, so the active account is unchanged (check connectivity, then run `cma refresh all`)")
+
+// anyKnownQuota reports whether at least one account returned a model limit
+// with a usage percentage attached.
+func anyKnownQuota(results []UsageResult, now time.Time) bool {
+	for _, result := range results {
+		if scoreAutoCandidate(result, now).knownQuotaCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	autoFiveHourWindow = 5 * time.Hour
 	autoWeeklyWindow   = 7 * 24 * time.Hour
@@ -38,6 +51,15 @@ func (m *Manager) AutoActivate(ctx context.Context) (domain.Account, error) {
 func selectAutoActivation(results []UsageResult, now time.Time) (UsageResult, error) {
 	if len(results) == 0 {
 		return UsageResult{}, errNoSavedAccounts
+	}
+
+	// With no quota data anywhere, every candidate scores zero, every
+	// comparison ties, and the choice collapses to whichever display name
+	// sorts first. Switching the active account on that basis is worse than
+	// doing nothing: offline, or with every refresh token expired, it moves
+	// the user off a working account for no reason.
+	if !anyKnownQuota(results, now) {
+		return UsageResult{}, errNoUsageData
 	}
 
 	best := results[0]

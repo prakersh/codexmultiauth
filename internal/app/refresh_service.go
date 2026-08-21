@@ -55,8 +55,8 @@ func (m *Manager) refreshMutexFor(accountID string) *sync.Mutex {
 // account's OAuth tokens need refreshing, calls the token authority, and
 // persists the result. All token-consumption paths (usage, activate, limits,
 // TUI selection, explicit `cma refresh`) should go through this function so
-// the refresh decision — including expiry thresholds, retry policy, and
-// persistence atomicity — lives in one place.
+// the refresh decision (expiry thresholds, retry policy, and persistence
+// atomicity) lives in one place.
 //
 // The semantics mirror upstream codex's refresh_token / ReloadedChanged
 // pattern: we serialize per-account refreshes, re-read on-disk auth inside

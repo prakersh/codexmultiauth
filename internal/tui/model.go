@@ -24,6 +24,7 @@ const (
 	modeRestorePass
 	modeRestoreReview
 	modeRestoreConflict
+	modeDeleteConfirm
 )
 
 type model struct {
@@ -47,6 +48,9 @@ type model struct {
 	restoreConflictQueue  []app.RestoreCandidate
 	restoreConflictIndex  int
 	restoreConflictChoice int
+	pendingDelete         string
+	pendingDeleteName     string
+	pendingDeleteActive   bool
 	restoreDecisions      map[string]app.RestoreDecision
 }
 
@@ -147,6 +151,20 @@ func (m model) selectedSelector() string {
 	return m.accounts[m.selected].Account.ID
 }
 
+func (m model) selectedDisplayName() string {
+	if len(m.accounts) == 0 || m.selected >= len(m.accounts) {
+		return ""
+	}
+	return m.accounts[m.selected].Account.DisplayName
+}
+
+func (m model) selectedIsActive() bool {
+	if len(m.accounts) == 0 || m.selected >= len(m.accounts) {
+		return false
+	}
+	return m.accounts[m.selected].IsActive
+}
+
 func (m model) backupCmd(target, passphrase string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := m.service.Backup(context.Background(), app.BackupInput{
@@ -218,11 +236,14 @@ func (m model) activateCmd(selector string) tea.Cmd {
 	}
 }
 
-func (m model) deleteCmd(selector string) tea.Cmd {
+// deleteCmd runs only after modeDeleteConfirm is acknowledged. allowActive
+// mirrors the CLI: deleting the active account needs its own explicit consent,
+// rather than the TUI force-overriding the service-level guard.
+func (m model) deleteCmd(selector string, allowActive bool) tea.Cmd {
 	return func() tea.Msg {
 		err := m.service.Delete(context.Background(), app.DeleteInput{
 			Selector:          selector,
-			AllowActiveDelete: true,
+			AllowActiveDelete: allowActive,
 		})
 		if err != nil {
 			return actionMsg{err: err}

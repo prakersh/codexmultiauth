@@ -34,7 +34,9 @@ If you use multiple Codex accounts, setup is usually easy. Repeated switching is
 - Create encrypted backups: `cma backup <passphrase-source> <name|abspath>`
 - Restore selectively or all-at-once: `cma restore ... [--all]`
 - View account usage with confidence labels: `cma usage <selector|all>`
-- Show limits with account details, confidence, and reset windows: `cma limits`
+- Show limits with account details, data provenance, and reset windows: `cma limits`
+- Force a token refresh for one or every account: `cma refresh <all|selector>`
+- Verify state and vault consistency: `cma doctor`
 - Run interactive terminal UI: `cma tui`
 
 ## Requirements
@@ -138,7 +140,7 @@ go build -o cma .
 ./autoloop.sh
 
 # Optional overrides
-CMA_BIN=/Users/prakersh/bin/cma SLEEP_SECONDS=300 ./autoloop.sh
+CMA_BIN=/usr/local/bin/cma SLEEP_SECONDS=300 ./autoloop.sh
 ```
 
 `autoloop.sh` prints colored cycle headers, current limit snapshots, auto-selection results, and the next scheduled check time.

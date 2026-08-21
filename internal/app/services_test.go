@@ -489,3 +489,59 @@ func buildJWT(t *testing.T, payload map[string]any) string {
 	require.NoError(t, err)
 	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body) + ".sig"
 }
+
+// TestVaultOnlyRemovesEntries covers the write-order decision. A delete must
+// publish state before the vault so a crash between the two leaves an inert
+// orphan vault entry rather than a state pointer to a missing row, which is
+// what makes cma usage hard-error and cma doctor fail.
+func TestVaultOnlyRemovesEntries(t *testing.T) {
+	onDisk := []byte(`{"version":"v1","entries":[{"account_id":"a"},{"account_id":"b"}]}`)
+
+	remove := store.Vault{Entries: []store.VaultEntry{{AccountID: "a"}}}
+	require.True(t, vaultOnlyRemovesEntries(onDisk, true, remove), "delete should write state first")
+
+	add := store.Vault{Entries: []store.VaultEntry{{AccountID: "a"}, {AccountID: "b"}, {AccountID: "c"}}}
+	require.False(t, vaultOnlyRemovesEntries(onDisk, true, add), "save should write vault first")
+
+	unchanged := store.Vault{Entries: []store.VaultEntry{{AccountID: "a"}, {AccountID: "b"}}}
+	require.False(t, vaultOnlyRemovesEntries(onDisk, true, unchanged), "rename changes no entry set")
+
+	mixed := store.Vault{Entries: []store.VaultEntry{{AccountID: "a"}, {AccountID: "z"}}}
+	require.False(t, vaultOnlyRemovesEntries(onDisk, true, mixed), "mixed commits take the add-safe order")
+
+	require.False(t, vaultOnlyRemovesEntries(nil, false, remove), "no vault on disk yet")
+	require.False(t, vaultOnlyRemovesEntries([]byte("not json"), true, remove), "unreadable vault keeps add-safe order")
+}
+
+// TestSaveRejectsChangedAuthUnderExpectFingerprint covers the gap between
+// `cma new` finishing its browser login and Save taking the lock. A concurrent
+// command writing ~/.codex/auth.json in that window used to make Save match the
+// pre-existing account, rename it, and drop the new credentials entirely.
+func TestSaveRejectsChangedAuthUnderExpectFingerprint(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a","refresh_token":"r","account_id":"acc-1"}}`), domain.AuthStoreFile)
+	_, err := manager.Save(ctx, SaveInput{DisplayName: "work"})
+	require.NoError(t, err)
+
+	// A stale fingerprint stands in for auth.json having been rewritten.
+	_, err = manager.Save(ctx, SaveInput{
+		DisplayName:       "should-not-apply",
+		ExpectFingerprint: "fingerprint-of-the-account-that-was-logged-in",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "changed before it could be saved")
+
+	// The pre-existing account must not have been renamed.
+	accounts, err := manager.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, "work", accounts[0].Account.DisplayName)
+
+	// A matching fingerprint still saves normally.
+	record, err := authStore.Load(ctx)
+	require.NoError(t, err)
+	_, err = manager.Save(ctx, SaveInput{DisplayName: "work2", ExpectFingerprint: record.Fingerprint})
+	require.NoError(t, err)
+}

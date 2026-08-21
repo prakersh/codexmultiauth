@@ -19,7 +19,7 @@ Each backup stores:
 ```bash
 cma backup prompt nightly
 cma backup env:CMA_PASS nightly
-cma backup hash:736563726574 /abs/path/nightly.cma.bak
+cma backup hash:736563726574 /abs/path/nightly.cma.bak --allow-plain-pass-arg
 ```
 
 Target rules:
@@ -63,7 +63,7 @@ Conflict detection order:
 ```bash
 cma restore prompt nightly
 cma restore env:CMA_PASS nightly --all --conflict overwrite
-cma restore hash:736563726574 /abs/path/nightly.cma.bak --conflict rename
+cma restore hash:736563726574 /abs/path/nightly.cma.bak --conflict rename --allow-plain-pass-arg
 ```
 
 ## TUI restore flow

@@ -117,3 +117,38 @@ func TestMarshalUnmarshalEnvelope(t *testing.T) {
 	require.Equal(t, envelope.Version, decoded.Version)
 	require.Equal(t, "vault", decoded.Metadata["kind"])
 }
+
+// TestDecryptWithPassphrase_RejectsHostileKDFParams covers KDF parameters read
+// from a file that has not been authenticated yet. argon2.IDKey panics on zero
+// iterations or parallelism and honors Memory literally, so a corrupted or
+// hostile backup could crash the process or drive a huge allocation before the
+// user ever confirms the restore.
+func TestDecryptWithPassphrase_RejectsHostileKDFParams(t *testing.T) {
+	build := func(mutate func(*cmacrypto.KDFMetadata)) cmacrypto.Envelope {
+		envelope, err := cmacrypto.EncryptWithPassphrase(
+			[]byte("backup"), []byte("correct horse"), cmacrypto.DefaultArgon2idParams(), nil)
+		require.NoError(t, err)
+		require.NotNil(t, envelope.KDF)
+		mutate(envelope.KDF)
+		return envelope
+	}
+
+	cases := map[string]func(*cmacrypto.KDFMetadata){
+		"zero iterations":   func(k *cmacrypto.KDFMetadata) { k.Iterations = 0 },
+		"zero parallelism":  func(k *cmacrypto.KDFMetadata) { k.Parallelism = 0 },
+		"absurd memory":     func(k *cmacrypto.KDFMetadata) { k.Memory = 4294967295 },
+		"absurd iterations": func(k *cmacrypto.KDFMetadata) { k.Iterations = 1 << 20 },
+		"short key length":  func(k *cmacrypto.KDFMetadata) { k.KeyLength = 1 },
+		"absurd key length": func(k *cmacrypto.KDFMetadata) { k.KeyLength = 1 << 20 },
+	}
+
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			// require.NotPanics is the point: the old code panicked here.
+			require.NotPanics(t, func() {
+				_, err := cmacrypto.DecryptWithPassphrase(build(mutate), []byte("correct horse"))
+				require.Error(t, err)
+			})
+		})
+	}
+}

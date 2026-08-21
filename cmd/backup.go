@@ -36,6 +36,6 @@ func newBackupCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow plain passphrase arguments, including pass:<literal> and bare literals")
+	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow passphrase arguments that place the passphrase in argv: hash:<hex>, pass:<literal>, and bare literals")
 	return cmd
 }

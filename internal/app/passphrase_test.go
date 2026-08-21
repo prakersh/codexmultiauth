@@ -15,9 +15,26 @@ func TestResolvePassphrase_Env(t *testing.T) {
 }
 
 func TestResolvePassphrase_Hash(t *testing.T) {
-	pass, err := app.ResolvePassphrase("hash:616263", false, nil)
+	pass, err := app.ResolvePassphrase("hash:616263", true, nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte("abc"), pass)
+}
+
+// hash: hex-decodes straight to the passphrase, so it puts the secret in argv
+// exactly like pass: does and must sit behind the same flag.
+func TestResolvePassphrase_HashRequiresPlainFlag(t *testing.T) {
+	_, err := app.ResolvePassphrase("hash:616263", false, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--allow-plain-pass-arg")
+}
+
+// An unrecognized source is usually a passphrase containing a colon; the error
+// must never echo it back.
+func TestResolvePassphrase_UnsupportedSourceDoesNotEchoSecret(t *testing.T) {
+	_, err := app.ResolvePassphrase("S3cret:horse!", true, nil)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "S3cret")
+	require.NotContains(t, err.Error(), "horse")
 }
 
 func TestResolvePassphrase_PlainRejectedWithoutFlag(t *testing.T) {
@@ -52,10 +69,10 @@ func TestResolvePassphrase_ErrorBranches(t *testing.T) {
 	_, err = app.ResolvePassphrase("env:EMPTY_PASS", false, nil)
 	require.Error(t, err)
 
-	_, err = app.ResolvePassphrase("hash:", false, nil)
+	_, err = app.ResolvePassphrase("hash:", true, nil)
 	require.Error(t, err)
 
-	_, err = app.ResolvePassphrase("hash:not-hex", false, nil)
+	_, err = app.ResolvePassphrase("hash:not-hex", true, nil)
 	require.Error(t, err)
 
 	pass, err := app.ResolvePassphrase("pass:secret", true, nil)

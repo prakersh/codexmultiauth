@@ -43,8 +43,13 @@ func Write(path string, accounts []Account, passphrase []byte) error {
 	if err != nil {
 		return fmt.Errorf("marshal backup file: %w", err)
 	}
-	if err := cmafs.EnsureDir(filepath.Dir(path)); err != nil {
+	// The destination is user-supplied, so create it if missing but never
+	// re-permission a directory that already exists.
+	if err := cmafs.EnsureDirCreateOnly(filepath.Dir(path)); err != nil {
 		return err
 	}
-	return cmafs.WriteFileAtomic(path, data, cmafs.AtomicWriteOptions{Mode: cmafs.FileMode})
+	return cmafs.WriteFileAtomic(path, data, cmafs.AtomicWriteOptions{
+		Mode:            cmafs.FileMode,
+		PreserveDirMode: true,
+	})
 }

@@ -60,6 +60,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateRestoreReview(msg)
 		case modeRestoreConflict:
 			return m.updateRestoreConflict(msg)
+		case modeDeleteConfirm:
+			return m.updateDeleteConfirm(msg)
 		default:
 			return m.updateInput(msg)
 		}
@@ -92,8 +94,13 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.activateCmd(selector)
 		}
 	case "d":
+		// Deleting drops the vault entry, which is the only copy of those
+		// credentials. Confirm first instead of acting on a single keypress.
 		if selector := m.selectedSelector(); selector != "" {
-			return m, m.deleteCmd(selector)
+			m.pendingDelete = selector
+			m.pendingDeleteName = m.selectedDisplayName()
+			m.pendingDeleteActive = m.selectedIsActive()
+			m.mode = modeDeleteConfirm
 		}
 	case "b":
 		m.mode = modeBackupName
@@ -199,6 +206,23 @@ func (m model) updateRestoreReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.restorePlannedCmd()
 	}
+	return m, nil
+}
+
+// updateDeleteConfirm requires an explicit y before anything is removed.
+// Any other key cancels, so a stray keypress is never destructive.
+func (m model) updateDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	selector := m.pendingDelete
+	allowActive := m.pendingDeleteActive
+	m.pendingDelete = ""
+	m.pendingDeleteName = ""
+	m.pendingDeleteActive = false
+	m.mode = modeMain
+
+	if msg.String() == "y" && selector != "" {
+		return m, m.deleteCmd(selector, allowActive)
+	}
+	m.message = "Delete cancelled"
 	return m, nil
 }
 

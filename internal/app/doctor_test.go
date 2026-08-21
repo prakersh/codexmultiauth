@@ -74,3 +74,41 @@ func TestCheckStateVaultInvariants_Consistent(t *testing.T) {
 		store.Vault{Entries: []store.VaultEntry{{AccountID: "a"}, {AccountID: "b"}}},
 	))
 }
+
+// TestDoctor_ReportsTamperedFingerprint covers relabelling or swapping a vault
+// entry outside CMA: the AEAD authenticates the ciphertext, but the fingerprint
+// stored beside it is plaintext, so doctor is what surfaces the mismatch.
+func TestDoctor_ReportsTamperedFingerprint(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a","refresh_token":"r","account_id":"acc-1"}}`), domain.AuthStoreFile)
+	_, err := manager.Save(ctx, SaveInput{DisplayName: "work"})
+	require.NoError(t, err)
+
+	status, err := manager.Doctor(ctx)
+	require.NoError(t, err)
+	require.NotContains(t, status, "warning")
+
+	// A healthy vault stays quiet; a divergent fingerprint is reported.
+	mismatches := checkVaultFingerprints(
+		domain.State{Accounts: []domain.Account{{ID: "acc-1", Fingerprint: "not-the-real-one"}}},
+		store.Vault{Entries: []store.VaultEntry{{
+			AccountID: "acc-1",
+			Payload:   []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a","refresh_token":"r","account_id":"acc-1"}}`),
+		}}},
+	)
+	require.Len(t, mismatches, 1)
+	require.Contains(t, mismatches[0], "state fingerprint does not match")
+
+	entryMismatch := checkVaultFingerprints(
+		domain.State{},
+		store.Vault{Entries: []store.VaultEntry{{
+			AccountID:   "acc-1",
+			Fingerprint: "wrong",
+			Payload:     []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a","refresh_token":"r","account_id":"acc-1"}}`),
+		}}},
+	)
+	require.Len(t, entryMismatch, 1)
+	require.Contains(t, entryMismatch[0], "vault entry fingerprint does not match")
+}

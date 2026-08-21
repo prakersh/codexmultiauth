@@ -14,6 +14,8 @@ func (m model) View() string {
 		return m.restoreReviewView()
 	case modeRestoreConflict:
 		return m.restoreConflictView()
+	case modeDeleteConfirm:
+		return m.deleteConfirmView()
 	}
 
 	var builder strings.Builder
@@ -70,7 +72,24 @@ func (m model) View() string {
 		builder.WriteString("\n" + statusStyle.Render(m.message) + "\n")
 	}
 	builder.WriteString("\n")
-	builder.WriteString(footerStyle.Render("j/k move  u usage  s save  a activate  d delete  b backup  R restore  r refresh  q quit"))
+	builder.WriteString(footerStyle.Render("j/k move  u usage  s save  a activate  d delete (asks first)  b backup  R restore  r refresh  q quit"))
+	return builder.String()
+}
+
+func (m model) deleteConfirmView() string {
+	name := m.pendingDeleteName
+	if name == "" {
+		name = m.pendingDelete
+	}
+	var builder strings.Builder
+	builder.WriteString(titleStyle.Render("Delete Account"))
+	builder.WriteString("\n\n")
+	builder.WriteString(fmt.Sprintf("Delete %s?\n", name))
+	if m.pendingDeleteActive {
+		builder.WriteString("This is the active account.\n")
+	}
+	builder.WriteString("\nThe stored credentials are removed from the vault and cannot be recovered.\n\n")
+	builder.WriteString(footerStyle.Render("y to delete, any other key to cancel"))
 	return builder.String()
 }
 

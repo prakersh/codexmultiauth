@@ -127,7 +127,7 @@ func TestApplyRestore_StaleDecisionReasonFallsThroughToPolicy(t *testing.T) {
 
 	// Decision was recorded against a display_name conflict, but re-analysis
 	// now reports a fingerprint conflict. Decision must be ignored and the
-	// policy (ConflictAsk) takes over — which errors asking the user to
+	// policy (ConflictAsk) takes over, which errors asking the user to
 	// re-run restore interactively.
 	_, _, _, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictAsk, map[string]app.RestoreDecision{
 		"acc-2": {Policy: domain.ConflictOverwrite, ExpectedReason: "display_name", ExpectedExistingID: "acc-1"},
@@ -176,7 +176,7 @@ func TestApplyRestore_MatchingDecisionIsHonoured(t *testing.T) {
 		},
 	}
 
-	// Decision matches the re-detected conflict (reason + existing ID) —
+	// Decision matches the re-detected conflict (reason plus existing ID),
 	// must be applied instead of the fallback policy.
 	nextState, _, imported, err := app.ApplyRestore(state, store.Vault{}, candidates, domain.ConflictSkip, map[string]app.RestoreDecision{
 		"acc-2": {Policy: domain.ConflictOverwrite, ExpectedReason: "display_name", ExpectedExistingID: "acc-1"},

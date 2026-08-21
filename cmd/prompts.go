@@ -1,13 +1,31 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	"golang.org/x/term"
 )
 
 var askOne = survey.AskOne
+
+// ErrNotInteractive is returned instead of prompting when there is no
+// terminal to prompt on. Without this, running under cron, CI, or with stdin
+// redirected produced a bare "EOF" from the prompt library.
+var ErrNotInteractive = errors.New("this command needs a value that was not supplied, and there is no terminal to prompt on; pass it as a flag or argument")
+
+// stdinIsTerminal is a variable so tests can drive both paths.
+var stdinIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// interactive reports whether prompting is possible at all.
+func interactive() bool {
+	return stdinIsTerminal()
+}
 
 func promptText(message, defaultValue string) (string, error) {
 	var value string

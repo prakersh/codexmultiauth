@@ -50,7 +50,11 @@ func (c *Client) Fetch(ctx context.Context, auth store.CodexAuth) (domain.UsageS
 		req.Header.Set("Accept", "application/json")
 		if auth.Tokens.AccountID != "" {
 			req.Header.Set("X-Account-Id", auth.Tokens.AccountID)
-			req.Header.Set("ChatClaude-Account-Id", auth.Tokens.AccountID)
+			// The API scopes the response to this header and echoes the
+			// account back in account_id. It was misspelled ChatClaude-, so
+			// it was ignored and usage came back for whichever account the
+			// token defaults to rather than the one being asked about.
+			req.Header.Set("ChatGPT-Account-Id", auth.Tokens.AccountID)
 		}
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {

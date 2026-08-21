@@ -23,6 +23,9 @@ type AtomicWriteOptions struct {
 	Mode   os.FileMode
 	Verify func(path string) error
 	Hooks  AtomicWriteHooks
+	// PreserveDirMode leaves an existing parent directory's permissions
+	// untouched. Set it when the caller writes to a user-supplied path.
+	PreserveDirMode bool
 }
 
 func WriteFileAtomic(path string, data []byte, opts AtomicWriteOptions) error {
@@ -47,7 +50,7 @@ func WriteFileAtomic(path string, data []byte, opts AtomicWriteOptions) error {
 		originalMode = mode
 	}
 
-	committed, err := writeFileAtomicNoRollback(path, data, mode, opts.Hooks)
+	committed, err := writeFileAtomicNoRollback(path, data, mode, opts.Hooks, opts.PreserveDirMode)
 	if err != nil {
 		if committed {
 			rollbackErr := rollbackAtomicWrite(path, existed, originalData, originalMode)
@@ -71,8 +74,12 @@ func WriteFileAtomic(path string, data []byte, opts AtomicWriteOptions) error {
 	return nil
 }
 
-func writeFileAtomicNoRollback(path string, data []byte, mode os.FileMode, hooks AtomicWriteHooks) (bool, error) {
-	if err := EnsureParentDir(path); err != nil {
+func writeFileAtomicNoRollback(path string, data []byte, mode os.FileMode, hooks AtomicWriteHooks, preserveDirMode bool) (bool, error) {
+	ensure := EnsureParentDir
+	if preserveDirMode {
+		ensure = EnsureParentDirCreateOnly
+	}
+	if err := ensure(path); err != nil {
 		return false, err
 	}
 
@@ -139,7 +146,7 @@ func rollbackAtomicWrite(path string, existed bool, originalData []byte, mode os
 		}
 		return syncDir(filepath.Dir(path))
 	}
-	if _, err := writeFileAtomicNoRollback(path, originalData, mode, AtomicWriteHooks{}); err != nil {
+	if _, err := writeFileAtomicNoRollback(path, originalData, mode, AtomicWriteHooks{}, true); err != nil {
 		return fmt.Errorf("restore original file %s: %w", path, err)
 	}
 	return nil

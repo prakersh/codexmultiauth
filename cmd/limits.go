@@ -135,8 +135,8 @@ func collectQuotaColumns(results []app.UsageResult) []quotaColumn {
 // spanning several distinct windows will still be wider than 80 columns,
 // which is inherent to showing every limit an account reports.
 const (
-	maxAccountWidth = 18
-	maxUserWidth    = 26
+	maxAccountWidth = 16
+	maxUserWidth    = 24
 )
 
 // truncateCell shortens a value to limit runes, marking the cut with "..." so
@@ -174,7 +174,7 @@ func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) 
 
 	columns := collectQuotaColumns(results)
 
-	headers := []string{"ACCOUNT", "USER", "PLAN"}
+	headers := []string{"ACCOUNT", "USER", "PLAN", "DATA"}
 	for _, column := range columns {
 		headers = append(headers, column.valueHeader, column.resetHeader)
 	}
@@ -203,6 +203,7 @@ func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) 
 			{text: name},
 			{text: truncateCell(formatUserShort(result.Info), maxUserWidth)},
 			{text: plan},
+			confidenceCell(result, red, yellow, green, dim),
 		}
 
 		byKey := make(map[string]domain.UsageQuota, len(result.Usage.Quotas))
@@ -250,7 +251,7 @@ func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) 
 	}
 	fmt.Fprintf(out, "%s%s%s\n", bold, renderRow(headerCells, widths, reset), reset)
 
-	fmt.Fprintf(out, "%s%s%s\n", dim, strings.Repeat("─", rowWidth(widths)), reset)
+	fmt.Fprintf(out, "%s%s%s\n", dim, strings.Repeat("-", rowWidth(widths)), reset)
 
 	for _, row := range rows {
 		fmt.Fprintln(out, renderRow(row, widths, reset))
@@ -264,6 +265,24 @@ func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) 
 // non-ASCII characters do not skew column padding.
 func displayWidth(value string) int {
 	return utf8.RuneCountInString(value)
+}
+
+// confidenceCell reports where the row's numbers came from. Usage fetch errors
+// are swallowed so the account still lists, which would otherwise make an
+// all-"-" row indistinguishable between "nothing consumed" and "never reached
+// the API".
+func confidenceCell(result app.UsageResult, red, yellow, green, dim string) cell {
+	if result.Usage.LimitReached {
+		return cell{text: "limited", color: red}
+	}
+	switch result.Usage.Confidence {
+	case domain.UsageConfidenceConfirmed:
+		return cell{text: "live", color: green}
+	case domain.UsageConfidenceBestEffort:
+		return cell{text: "cached", color: yellow}
+	default:
+		return cell{text: "none", color: dim}
+	}
 }
 
 func rowWidth(widths []int) int {

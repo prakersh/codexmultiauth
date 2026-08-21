@@ -109,7 +109,7 @@ func (m *VaultKeyManager) LoadOrCreate(ctx context.Context) ([]byte, VaultKeyPro
 		return nil, "", err
 	}
 	if !cfg.DisableKeyring && m.keyring != nil {
-		key, err := m.loadOrCreateKeyringKey()
+		key, err := m.loadOrCreateKeyringKey(m.fileKeyExists())
 		if err == nil {
 			return key, VaultKeyProviderKeyring, nil
 		}
@@ -121,7 +121,24 @@ func (m *VaultKeyManager) LoadOrCreate(ctx context.Context) ([]byte, VaultKeyPro
 	return key, VaultKeyProviderFile, nil
 }
 
-func (m *VaultKeyManager) loadOrCreateKeyringKey() ([]byte, error) {
+// fileKeyExists reports whether a file-backed vault key is already on disk.
+// Its presence is the only record that an earlier run encrypted the vault
+// under the file provider, because the vault itself does not name its provider.
+func (m *VaultKeyManager) fileKeyExists() bool {
+	_, err := os.Stat(m.paths.VaultKeyFile)
+	return err == nil
+}
+
+// loadOrCreateKeyringKey returns the keyring-held vault key, minting one only
+// when it is safe to do so.
+//
+// Minting unconditionally used to orphan vaults: if the first run could not
+// reach the keyring (headless box, denied keychain prompt) the vault was
+// encrypted under a file key, and a later run with a working keyring would
+// find no stored key, mint a fresh one, and fail every decrypt from then on
+// with "wrong passphrase or corrupted ciphertext" while the key that actually
+// works sat unread on disk. When a file key exists, defer to it instead.
+func (m *VaultKeyManager) loadOrCreateKeyringKey(fileKeyExists bool) ([]byte, error) {
 	key, err := m.keyring.Get(CMAVaultKeyringService, CMAVaultKeyringAccount)
 	if err == nil {
 		if len(key) != cmacrypto.KeyLength {
@@ -132,6 +149,9 @@ func (m *VaultKeyManager) loadOrCreateKeyringKey() ([]byte, error) {
 	if !errors.Is(err, keyring.ErrKeyNotFound) {
 		return nil, err
 	}
+	if fileKeyExists {
+		return nil, errVaultKeyFilePreferred
+	}
 	key, err = cmacrypto.RandomBytes(cmacrypto.KeyLength)
 	if err != nil {
 		return nil, err
@@ -141,6 +161,10 @@ func (m *VaultKeyManager) loadOrCreateKeyringKey() ([]byte, error) {
 	}
 	return key, nil
 }
+
+// errVaultKeyFilePreferred signals that the keyring holds no key but a file
+// key already exists, so the caller must fall back rather than mint.
+var errVaultKeyFilePreferred = errors.New("vault key file already exists; preferring file provider")
 
 func (m *VaultKeyManager) loadOrCreateFileKey() ([]byte, error) {
 	data, err := os.ReadFile(m.paths.VaultKeyFile)

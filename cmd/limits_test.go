@@ -236,3 +236,53 @@ func TestPrintLimitsTableCapsIdentityColumns(t *testing.T) {
 	require.LessOrEqual(t, utf8.RuneCountInString(row), 85)
 	require.LessOrEqual(t, utf8.RuneCountInString(findLine(strings.Split(out.String(), "\n"), "ACCOUNT")), 85)
 }
+
+// TestPrintLimitsTableShowsDataProvenance covers the ambiguity the DATA column
+// removes: usage fetch errors are swallowed, so a row of "-" could mean either
+// "nothing consumed" or "never reached the API".
+func TestPrintLimitsTableShowsDataProvenance(t *testing.T) {
+	at := time.Date(2026, 9, 20, 2, 50, 0, 0, time.Local)
+	used := 0.0
+	results := []app.UsageResult{
+		{
+			Account: domain.Account{DisplayName: "live-acct"},
+			Info:    app.UsageAccountInfo{UserEmail: "live@example.com"},
+			Usage: domain.UsageSummary{
+				PlanType: "free", Confidence: domain.UsageConfidenceConfirmed,
+				Quotas: []domain.UsageQuota{{
+					Name: "monthly", DisplayName: "Monthly Limit",
+					WindowSeconds: 2592000, UsedPercent: &used, ResetsAt: &at,
+				}},
+			},
+		},
+		{
+			Account: domain.Account{DisplayName: "unreachable"},
+			Info:    app.UsageAccountInfo{UserEmail: "down@example.com"},
+			Usage:   domain.UsageSummary{PlanType: "free", Confidence: domain.UsageConfidenceUnknown},
+		},
+		{
+			Account: domain.Account{DisplayName: "blocked"},
+			Info:    app.UsageAccountInfo{UserEmail: "blocked@example.com"},
+			Usage: domain.UsageSummary{
+				PlanType: "pro", Confidence: domain.UsageConfidenceConfirmed, LimitReached: true,
+			},
+		},
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	printLimitsTable(cmd, results, true)
+
+	output := out.String()
+	lines := strings.Split(output, "\n")
+	require.Contains(t, findLine(lines, "ACCOUNT"), "DATA")
+	require.Contains(t, findLine(lines, "live-acct"), "live")
+	require.Contains(t, findLine(lines, "unreachable"), "none")
+	require.Contains(t, findLine(lines, "blocked"), "limited")
+
+	// User-facing output must stay on standard keyboard characters.
+	require.NotContains(t, output, "─")
+	require.NotContains(t, output, "—")
+	require.NotContains(t, output, "…")
+}

@@ -514,3 +514,25 @@ func TestDisplayNameHandlesNonASCIISlug(t *testing.T) {
 	require.Equal(t, "Über", displayName("über"))
 	require.Equal(t, "Cloud Tasks", displayName("cloud_tasks"))
 }
+
+// TestFetchSendsAccountScopeHeader pins the account-scoping header name. It was
+// misspelled "ChatClaude-Account-Id", so the API ignored it and returned usage
+// for whichever account the token defaults to instead of the one requested.
+func TestFetchSendsAccountScopeHeader(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"plan_type":"free","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":2592000,"reset_at":1900000000}}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.Fetch(context.Background(), store.CodexAuth{
+		Tokens: &store.CodexTokens{AccessToken: "token", AccountID: "acct-123"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "acct-123", got.Get("ChatGPT-Account-Id"))
+	require.Equal(t, "acct-123", got.Get("X-Account-Id"))
+	require.Empty(t, got.Get("ChatClaude-Account-Id"))
+}

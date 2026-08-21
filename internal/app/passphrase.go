@@ -28,6 +28,12 @@ func ResolvePassphrase(source string, allowPlain bool, prompt PromptFunc) ([]byt
 		}
 		return []byte(value), nil
 	case strings.HasPrefix(source, "hash:"):
+		// hash: is not a hash. It hex-decodes to the passphrase itself, so the
+		// material sits in argv exactly like pass: does and is visible to any
+		// local user through ps. It belongs behind the same gate.
+		if !allowPlain {
+			return nil, errPlainPassphraseArg
+		}
 		raw := strings.TrimSpace(strings.TrimPrefix(source, "hash:"))
 		if raw == "" {
 			return nil, errors.New("hash passphrase source requires hex payload")
@@ -39,18 +45,25 @@ func ResolvePassphrase(source string, allowPlain bool, prompt PromptFunc) ([]byt
 		return data, nil
 	case strings.HasPrefix(source, "pass:"):
 		if !allowPlain {
-			return nil, errors.New("plain passphrase arguments require --allow-plain-pass-arg; use prompt, env:VAR, hash:<hex>, or pass:<literal>")
+			return nil, errPlainPassphraseArg
 		}
 		return []byte(strings.TrimPrefix(source, "pass:")), nil
 	case isBarePassphraseLiteral(source):
 		if !allowPlain {
-			return nil, errors.New("plain passphrase arguments require --allow-plain-pass-arg; use prompt, env:VAR, hash:<hex>, or pass:<literal>")
+			return nil, errPlainPassphraseArg
 		}
 		return []byte(source), nil
 	default:
-		return nil, fmt.Errorf("unsupported passphrase source %q", source)
+		// Never echo the source. An unrecognized value is usually a passphrase
+		// that happens to contain a colon, so quoting it here would print the
+		// secret to stderr, into scrollback, and into any CI log.
+		return nil, errors.New("unsupported passphrase source; a passphrase containing ':' must be passed as pass:<literal> or through env:VAR")
 	}
 }
+
+// errPlainPassphraseArg is shared so no branch can accidentally phrase this
+// with the passphrase interpolated into it.
+var errPlainPassphraseArg = errors.New("plain passphrase arguments require --allow-plain-pass-arg; use prompt or env:VAR to keep the passphrase out of argv")
 
 func isBarePassphraseLiteral(source string) bool {
 	source = strings.TrimSpace(source)

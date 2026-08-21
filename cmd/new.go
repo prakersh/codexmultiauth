@@ -17,6 +17,7 @@ func newLoginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "login",
 		Aliases: []string{"new"},
+		Args:    cobra.NoArgs,
 		Short:   "Run Codex login and save the resulting account",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, err := newService()

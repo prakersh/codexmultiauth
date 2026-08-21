@@ -134,3 +134,56 @@ func TestVaultKeyManager_IsDeterministicWhenExternalDisableKeyringIsPreset(t *te
 	require.NoError(t, err)
 	require.Equal(t, store.VaultKeyProviderKeyring, kind)
 }
+
+// TestVaultKeyManager_DoesNotOrphanVaultAfterKeyringOutage reproduces the
+// sequence that used to make a vault permanently undecryptable: a first run
+// with no reachable keyring falls back to a file key and encrypts the vault
+// under it, then a later run with a working but empty keyring minted a fresh
+// key and returned that instead. The file key must win once it exists.
+func TestVaultKeyManager_DoesNotOrphanVaultAfterKeyringOutage(t *testing.T) {
+	p := testenv.NewWithDisableKeyring(t, "").Paths
+
+	// Run 1: keyring unreachable (headless box, or a denied keychain prompt).
+	brokenRing := &fakeKeyring{getErr: errors.New("Specified keyring backend not available")}
+	firstKey, firstKind, err := store.NewVaultKeyManager(p, store.NewConfigRepo(p), brokenRing).
+		LoadOrCreate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, store.VaultKeyProviderFile, firstKind)
+
+	// Run 2: keyring now works but holds no key for CMA.
+	workingRing := &fakeKeyring{}
+	secondKey, secondKind, err := store.NewVaultKeyManager(p, store.NewConfigRepo(p), workingRing).
+		LoadOrCreate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, store.VaultKeyProviderFile, secondKind)
+	require.Equal(t, firstKey, secondKey, "vault would be undecryptable under a newly minted key")
+
+	// Nothing was written to the keyring, so run 3 stays on the file key too.
+	require.Empty(t, workingRing.values)
+}
+
+// A keyring key that already exists still takes precedence, so the normal
+// keyring-backed setup is unaffected by the fallback guard.
+func TestVaultKeyManager_PrefersExistingKeyringKeyOverFileKey(t *testing.T) {
+	p := testenv.NewWithDisableKeyring(t, "").Paths
+
+	broken := &fakeKeyring{getErr: errors.New("backend unavailable")}
+	fileKey, kind, err := store.NewVaultKeyManager(p, store.NewConfigRepo(p), broken).
+		LoadOrCreate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, store.VaultKeyProviderFile, kind)
+
+	stored := make([]byte, cmacrypto.KeyLength)
+	for i := range stored {
+		stored[i] = byte(i + 1)
+	}
+	ring := &fakeKeyring{}
+	require.NoError(t, ring.Set(store.CMAVaultKeyringService, store.CMAVaultKeyringAccount, stored))
+
+	key, kind, err := store.NewVaultKeyManager(p, store.NewConfigRepo(p), ring).
+		LoadOrCreate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, store.VaultKeyProviderKeyring, kind)
+	require.Equal(t, stored, key)
+	require.NotEqual(t, fileKey, key)
+}

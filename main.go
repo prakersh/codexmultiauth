@@ -18,6 +18,8 @@ var sensitiveErrorPatterns = []struct {
 	value   string
 }{
 	{pattern: regexp.MustCompile(`pass:[^\s"']+`), value: "pass:[REDACTED]"},
+	// hash: hex-decodes to the passphrase itself, so it is just as sensitive.
+	{pattern: regexp.MustCompile(`hash:[^\s"']+`), value: "hash:[REDACTED]"},
 	{pattern: regexp.MustCompile(`"access_token":"[^"]*"`), value: `"access_token":"[REDACTED]"`},
 	{pattern: regexp.MustCompile(`"refresh_token":"[^"]*"`), value: `"refresh_token":"[REDACTED]"`},
 	{pattern: regexp.MustCompile(`"id_token":"[^"]*"`), value: `"id_token":"[REDACTED]"`},

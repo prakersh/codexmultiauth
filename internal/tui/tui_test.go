@@ -251,8 +251,15 @@ func TestMainActionsAndAsyncMessages(t *testing.T) {
 	require.Equal(t, "Activated work", m.message)
 	require.Equal(t, "1", svc.lastActivate)
 
+	// Deleting now takes two keys: d opens the confirmation, y performs it.
 	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = next.(model)
+	require.Nil(t, cmd, "d must not delete on its own")
+	require.Equal(t, modeDeleteConfirm, m.mode)
+
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = next.(model)
+	require.Equal(t, modeMain, m.mode)
 	next, _ = m.Update(cmd())
 	m = next.(model)
 	require.Equal(t, "Deleted account", m.message)
@@ -428,4 +435,40 @@ func TestUsageViewEmptyStateWhenNoPercentages(t *testing.T) {
 		}},
 	}
 	require.Contains(t, m.View(), "No limit windows reported")
+}
+
+// TestDeleteRequiresConfirmation covers the destructive path: the vault entry
+// is the only copy of an account's credentials, so a single stray keypress
+// must not remove it.
+func TestDeleteRequiresConfirmation(t *testing.T) {
+	svc := &fakeService{accounts: []app.ListedAccount{
+		{Account: domain.Account{ID: "1", DisplayName: "work"}, IsActive: true},
+		{Account: domain.Account{ID: "2", DisplayName: "personal"}},
+	}}
+	m := model{service: svc, input: textInput(), accounts: svc.accounts}
+
+	// Any key other than y cancels and deletes nothing.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = next.(model)
+	require.Equal(t, modeDeleteConfirm, m.mode)
+	require.Contains(t, m.View(), "cannot be recovered")
+	require.Contains(t, m.View(), "work")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = next.(model)
+	require.Nil(t, cmd)
+	require.Equal(t, modeMain, m.mode)
+	require.Equal(t, "Delete cancelled", m.message)
+	require.Empty(t, svc.lastDeleteInput.Selector, "cancel must not call Delete")
+
+	// A non-active account must not be force-deleted past the service guard.
+	m.selected = 1
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = next.(model)
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = next.(model)
+	require.NotNil(t, cmd)
+	_ = cmd()
+	require.Equal(t, "2", svc.lastDeleteInput.Selector)
+	require.False(t, svc.lastDeleteInput.AllowActiveDelete, "only the active account may set AllowActiveDelete")
 }

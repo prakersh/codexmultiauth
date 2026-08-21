@@ -19,6 +19,9 @@ func newRestoreCmd() *cobra.Command {
 		Short: "Restore accounts from an encrypted backup",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateConflictPolicy(conflict); err != nil {
+				return err
+			}
 			manager, err := newService()
 			if err != nil {
 				return err
@@ -44,10 +47,14 @@ func newRestoreCmd() *cobra.Command {
 			_ = artifact
 
 			if !all {
+				// Labels are numbered because a backup can hold two accounts
+				// with the same display name. Keying the lookup on the label
+				// alone collapsed those to one ID, so selecting both restored
+				// only one while reporting the smaller count.
 				options := make([]string, 0, len(candidates))
-				optionToID := map[string]string{}
-				for _, candidate := range candidates {
-					label := candidate.Account.DisplayName
+				optionToID := make(map[string]string, len(candidates))
+				for index, candidate := range candidates {
+					label := fmt.Sprintf("%d. %s", index+1, candidate.Account.DisplayName)
 					if candidate.Conflict != nil {
 						label += " [conflict:" + candidate.Conflict.Reason + "]"
 					}
@@ -59,7 +66,11 @@ func newRestoreCmd() *cobra.Command {
 					return err
 				}
 				for _, label := range selected {
-					input.Selected = append(input.Selected, optionToID[label])
+					id, ok := optionToID[label]
+					if !ok {
+						return fmt.Errorf("unrecognized selection %q", label)
+					}
+					input.Selected = append(input.Selected, id)
 				}
 			}
 
@@ -92,9 +103,21 @@ func newRestoreCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "restore all accounts atomically")
-	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow plain passphrase arguments, including pass:<literal> and bare literals")
+	cmd.Flags().BoolVar(&allowPlain, "allow-plain-pass-arg", false, "allow passphrase arguments that place the passphrase in argv: hash:<hex>, pass:<literal>, and bare literals")
 	cmd.Flags().StringVar(&conflict, "conflict", string(domain.ConflictAsk), "conflict policy: ask|overwrite|skip|rename")
 	return cmd
+}
+
+// validateConflictPolicy rejects a bad --conflict up front. Validation used to
+// happen deep inside the restore engine and only when a conflict actually
+// occurred, so a typo silently ran the whole restore under an invalid policy.
+func validateConflictPolicy(value string) error {
+	switch domain.ConflictPolicy(value) {
+	case domain.ConflictAsk, domain.ConflictOverwrite, domain.ConflictSkip, domain.ConflictRename:
+		return nil
+	default:
+		return fmt.Errorf("invalid --conflict %q: use ask, overwrite, skip, or rename", value)
+	}
 }
 
 func contains(values []string, target string) bool {

@@ -13,6 +13,11 @@ import (
 type SaveInput struct {
 	DisplayName string
 	Aliases     []string
+	// ExpectFingerprint pins the credentials the caller intends to save. Save
+	// reads ~/.codex/auth.json under the lock, so a command that inspected it
+	// beforehand (notably `cma new`, which logs in first) can be sure the file
+	// still holds the same account by the time the write happens.
+	ExpectFingerprint string
 }
 
 type SaveResult struct {
@@ -27,6 +32,9 @@ func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 		record, err := m.authStore.Load(ctx)
 		if err != nil {
 			return fmt.Errorf("load current codex auth: %w", err)
+		}
+		if want := strings.TrimSpace(input.ExpectFingerprint); want != "" && want != record.Fingerprint {
+			return fmt.Errorf("codex auth changed before it could be saved: another command wrote %s while this one was running", m.paths.CodexAuth)
 		}
 
 		state, vault, key, err := m.loadStateAndVault(ctx)

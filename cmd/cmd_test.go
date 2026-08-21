@@ -232,6 +232,11 @@ func TestCommandWorkflows(t *testing.T) {
 	}
 	newService = func() (service, error) { return svc, nil }
 	runTUI = func(service service) error { return nil }
+	// go test has no TTY, so prompting is skipped unless forced. This test
+	// exercises the interactive path.
+	originalStdinIsTerminal := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	defer func() { stdinIsTerminal = originalStdinIsTerminal }()
 	askOne = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
 		switch out := response.(type) {
 		case *string:
@@ -249,7 +254,8 @@ func TestCommandWorkflows(t *testing.T) {
 		case *bool:
 			*out = true
 		case *[]string:
-			*out = []string{"work [conflict:display_name]"}
+			// Labels are numbered so duplicate display names stay distinct.
+			*out = []string{"1. work [conflict:display_name]"}
 		}
 		return nil
 	}
@@ -525,4 +531,38 @@ func floatPtr(value float64) *float64 {
 
 func timePtr(value time.Time) *time.Time {
 	return &value
+}
+
+// TestSaveSkipsOptionalPromptsWithoutTerminal covers cron and CI: both values
+// are optional, so with no terminal the command must proceed rather than block
+// on a prompt and die with a bare EOF.
+func TestSaveSkipsOptionalPromptsWithoutTerminal(t *testing.T) {
+	originalService := newService
+	originalAskOne := askOne
+	originalStdinIsTerminal := stdinIsTerminal
+	defer func() {
+		newService = originalService
+		askOne = originalAskOne
+		stdinIsTerminal = originalStdinIsTerminal
+	}()
+
+	svc := &fakeService{saveResult: app.SaveResult{Account: domain.Account{DisplayName: "saved"}}}
+	newService = func() (service, error) { return svc, nil }
+	stdinIsTerminal = func() bool { return false }
+	askOne = func(prompt survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
+		t.Fatal("must not prompt without a terminal")
+		return nil
+	}
+
+	output, err := runCommand(newSaveCmd(), "--name", "from-flag")
+	require.NoError(t, err)
+	require.Contains(t, output, "Saved saved")
+	require.Equal(t, "from-flag", svc.lastSaveInput.DisplayName)
+	require.Empty(t, svc.lastSaveInput.Aliases)
+
+	// With no flags at all it still proceeds, letting the service default.
+	output, err = runCommand(newSaveCmd())
+	require.NoError(t, err)
+	require.Contains(t, output, "Saved saved")
+	require.Empty(t, svc.lastSaveInput.DisplayName)
 }

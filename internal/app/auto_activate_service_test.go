@@ -226,3 +226,27 @@ func TestSelectAutoActivationSkipsBlockedAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "usable", selected.Account.ID)
 }
+
+// TestSelectAutoActivationRefusesWithoutUsageData covers the offline case. With
+// no quota data anywhere every candidate ties at zero and the winner used to be
+// whichever display name sorted first, silently moving the user off a working
+// account.
+func TestSelectAutoActivationRefusesWithoutUsageData(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	results := []UsageResult{
+		{Account: domain.Account{ID: "aardvark", DisplayName: "aardvark"},
+			Usage: domain.UsageSummary{Confidence: domain.UsageConfidenceUnknown}},
+		{Account: domain.Account{ID: "zebra", DisplayName: "zebra"},
+			Usage: domain.UsageSummary{Confidence: domain.UsageConfidenceBestEffort, PlanType: "pro"}},
+	}
+
+	_, err := selectAutoActivation(results, fixedNow)
+	require.ErrorIs(t, err, errNoUsageData)
+
+	// One account with real data is enough to choose again.
+	results[1].Usage = singleWindowSummary("weekly", "Weekly Limit", 7*24*60*60, 10, fixedNow.AddDate(0, 0, 3))
+	selected, err := selectAutoActivation(results, fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, "zebra", selected.Account.ID)
+}

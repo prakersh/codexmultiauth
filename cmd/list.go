@@ -11,6 +11,7 @@ import (
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
+		Args:  cobra.NoArgs,
 		Short: "List saved accounts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, err := newService()

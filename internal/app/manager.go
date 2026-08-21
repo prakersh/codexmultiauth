@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -105,15 +106,18 @@ func (m *Manager) SetTokenRefresher(refresher TokenRefresher) {
 }
 
 func (m *Manager) withMutationLock(ctx context.Context, fn func() error) error {
-	if err := m.checkTornState(); err != nil {
-		return err
-	}
 	lockPath := m.paths.LockDir + "/cma.lock"
 	lock, err := m.lockManager.Acquire(ctx, lockPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = lock.Unlock() }()
+	// Checked under the lock, not before it. A mutation that passed the check
+	// and then waited on the lock would otherwise proceed even though the
+	// holder marked the state torn while it waited.
+	if err := m.checkTornState(); err != nil {
+		return err
+	}
 	return fn()
 }
 
@@ -179,15 +183,35 @@ func (m *Manager) commitStateAndVault(state domain.State, vault store.Vault, key
 		return err
 	}
 
-	// Save vault (data) first, then state (index). This ordering ensures
-	// that any state entry published to disk is backed by vault data that is
-	// already on disk — the dangerous direction is a state pointer to a
-	// missing vault row, not an inert vault entry without a pointer.
-	if err := m.vaultRepo.Save(vault, key); err != nil {
+	// The dangerous crash residue is a state pointer to a missing vault row:
+	// it makes `cma usage` hard-error and `cma doctor` fail. An inert vault
+	// entry with no pointer is harmless by comparison. Which write order
+	// avoids it depends on the direction of the change, so pick per commit
+	// rather than always writing vault first.
+	//
+	// Adding: vault first, so a published pointer is always already backed.
+	// Removing: state first, so the pointer is gone before its row is.
+	//
+	// A commit that both adds and removes cannot be made safe by ordering
+	// alone; those take the add-safe order, and the removal half is covered by
+	// the rollback below and by `cma doctor`.
+	stateFirst := vaultOnlyRemovesEntries(originalVault, vaultExists, vault)
+
+	saveVault := func() error { return m.vaultRepo.Save(vault, key) }
+	saveState := func() error { return m.stateRepo.Save(state) }
+
+	first, second := saveVault, saveState
+	secondRollbackPath, secondRollbackData, secondRollbackExists := m.paths.VaultFile, originalVault, vaultExists
+	if stateFirst {
+		first, second = saveState, saveVault
+		secondRollbackPath, secondRollbackData, secondRollbackExists = m.paths.StateFile, originalState, stateExists
+	}
+
+	if err := first(); err != nil {
 		return err
 	}
-	if err := m.stateRepo.Save(state); err != nil {
-		rollbackErr := restoreOptionalFile(m.paths.VaultFile, originalVault, vaultExists)
+	if err := second(); err != nil {
+		rollbackErr := restoreOptionalFile(secondRollbackPath, secondRollbackData, secondRollbackExists)
 		if rollbackErr != nil {
 			joined := errors.Join(err, rollbackErr)
 			m.markTornState(joined)
@@ -209,12 +233,55 @@ func (m *Manager) commitStateAndVault(state domain.State, vault store.Vault, key
 	return nil
 }
 
+// vaultOnlyRemovesEntries reports whether the pending vault drops entries that
+// are on disk without introducing any new ones. Account IDs sit in plaintext
+// beside each ciphertext, so this needs no key.
+func vaultOnlyRemovesEntries(originalVault []byte, vaultExists bool, next store.Vault) bool {
+	if !vaultExists {
+		return false
+	}
+	var current struct {
+		Entries []struct {
+			AccountID string `json:"account_id"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(originalVault, &current); err != nil {
+		// Unreadable on-disk vault: keep the add-safe order.
+		return false
+	}
+
+	nextIDs := make(map[string]struct{}, len(next.Entries))
+	for _, entry := range next.Entries {
+		nextIDs[entry.AccountID] = struct{}{}
+	}
+	currentIDs := make(map[string]struct{}, len(current.Entries))
+	for _, entry := range current.Entries {
+		currentIDs[entry.AccountID] = struct{}{}
+	}
+
+	for id := range nextIDs {
+		if _, ok := currentIDs[id]; !ok {
+			return false // adds something, so use the add-safe order
+		}
+	}
+	return len(nextIDs) < len(currentIDs)
+}
+
 // Doctor inspects on-disk state and vault for consistency. If they verify
 // cleanly, it clears any torn-state marker left by a prior failed rollback
-// and returns a human-readable status string. Callers should not hold the
-// mutation lock when invoking Doctor — it performs its own consistency
-// check and takes the lock only while clearing the marker.
+// and returns a human-readable status string.
+//
+// Doctor takes the mutation lock for the whole check so it cannot read a
+// half-committed state/vault pair, and so it cannot clear the marker while a
+// mutation is still in flight. Callers must not already hold the lock.
 func (m *Manager) Doctor(ctx context.Context) (string, error) {
+	lockPath := m.paths.LockDir + "/cma.lock"
+	lock, lockErr := m.lockManager.Acquire(ctx, lockPath)
+	if lockErr != nil {
+		return "", fmt.Errorf("doctor: acquire lock: %w", lockErr)
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	key, _, err := m.keyManager.LoadOrCreate(ctx)
 	if err != nil {
 		return "", fmt.Errorf("doctor: load key: %w", err)
@@ -233,7 +300,48 @@ func (m *Manager) Doctor(ctx context.Context) (string, error) {
 	if err := m.clearTornState(); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("ok: %d account(s), %d vault entry(ies)", len(state.Accounts), len(vault.Entries)), nil
+
+	// Integrity is reported rather than enforced. The ciphertext is
+	// authenticated by the AEAD, but the surrounding entry fields and
+	// state.json are plaintext, so a mismatch means an entry was relabelled or
+	// swapped outside CMA. Reporting keeps a legitimately drifted vault
+	// usable while still surfacing tampering.
+	summary := fmt.Sprintf("ok: %d account(s), %d vault entry(ies)", len(state.Accounts), len(vault.Entries))
+	if mismatches := checkVaultFingerprints(state, vault); len(mismatches) > 0 {
+		summary += fmt.Sprintf("\nwarning: %d entry(ies) failed fingerprint verification:", len(mismatches))
+		for _, mismatch := range mismatches {
+			summary += "\n  " + mismatch
+		}
+	}
+	return summary, nil
+}
+
+// checkVaultFingerprints recomputes each entry's fingerprint from its
+// decrypted payload and compares it against the fingerprint stored beside the
+// ciphertext and the one recorded in state.json.
+func checkVaultFingerprints(state domain.State, vault store.Vault) []string {
+	accounts := make(map[string]domain.Account, len(state.Accounts))
+	for _, account := range state.Accounts {
+		accounts[account.ID] = account
+	}
+
+	var mismatches []string
+	for _, entry := range vault.Entries {
+		_, canonical, err := store.NormalizeAndValidateAuth(entry.Payload)
+		if err != nil {
+			mismatches = append(mismatches, fmt.Sprintf("%s: payload does not parse as Codex auth", entry.AccountID))
+			continue
+		}
+		actual := store.FingerprintAuth(canonical)
+		if entry.Fingerprint != "" && entry.Fingerprint != actual {
+			mismatches = append(mismatches, fmt.Sprintf("%s: vault entry fingerprint does not match its payload", entry.AccountID))
+			continue
+		}
+		if account, ok := accounts[entry.AccountID]; ok && account.Fingerprint != "" && account.Fingerprint != actual {
+			mismatches = append(mismatches, fmt.Sprintf("%s: state fingerprint does not match the stored payload", entry.AccountID))
+		}
+	}
+	return mismatches
 }
 
 func checkStateVaultInvariants(state domain.State, vault store.Vault) error {

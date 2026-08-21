@@ -12,6 +12,7 @@ var runTUI = func(svc service) error {
 func newTUICmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
+		Args:  cobra.NoArgs,
 		Short: "Launch the interactive TUI",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, err := newService()
