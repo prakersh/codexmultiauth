@@ -7,15 +7,18 @@ import (
 	"os"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 )
 
 func (m *Manager) Activate(ctx context.Context, selector string) (domain.Account, error) {
 	var activated domain.Account
 	err := m.withMutationLock(ctx, func() error {
-		state, vault, key, err := m.loadStateAndVault(ctx)
+		state, vault, key, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
 		}
+		// The vault key is only needed for this operation.
+		defer cmacrypto.Zero(key)
 		account, err := domain.ResolveAccount(state.Accounts, selector)
 		if err != nil {
 			return err

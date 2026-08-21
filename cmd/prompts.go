@@ -33,10 +33,25 @@ func promptText(message, defaultValue string) (string, error) {
 	return value, err
 }
 
+// promptPassword reads the passphrase into a byte slice that the caller can
+// wipe. Reading it through a string, as the generic prompt helper does, would
+// leave an immutable copy on the heap that cannot be zeroed even in principle.
 func promptPassword(message string) ([]byte, error) {
-	var value string
-	err := askOne(&survey.Password{Message: message}, &value)
-	return []byte(value), err
+	if !interactive() {
+		return nil, ErrNotInteractive
+	}
+	fmt.Fprintf(os.Stderr, "%s: ", message)
+	value, err := readPassword()
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+// readPassword is a variable so tests can drive it without a terminal.
+var readPassword = func() ([]byte, error) {
+	return term.ReadPassword(int(os.Stdin.Fd()))
 }
 
 func promptConfirm(message string, defaultValue bool) (bool, error) {

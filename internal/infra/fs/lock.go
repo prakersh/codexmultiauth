@@ -17,6 +17,7 @@ type Unlocker interface {
 
 type lockHandle interface {
 	TryLockContext(ctx context.Context, retryDelay time.Duration) (bool, error)
+	TryRLockContext(ctx context.Context, retryDelay time.Duration) (bool, error)
 	Unlock() error
 	Path() string
 }
@@ -43,7 +44,18 @@ const (
 	defaultLockTimeout = 30 * time.Second
 )
 
+// AcquireShared takes a read lock. Several readers hold it at once, but it
+// excludes the exclusive lock a mutation takes, so a reader can never observe
+// state.json and the vault from opposite sides of a commit.
+func (m *FileLockManager) AcquireShared(ctx context.Context, path string) (Unlocker, error) {
+	return m.acquire(ctx, path, true)
+}
+
 func (m *FileLockManager) Acquire(ctx context.Context, path string) (Unlocker, error) {
+	return m.acquire(ctx, path, false)
+}
+
+func (m *FileLockManager) acquire(ctx context.Context, path string, shared bool) (Unlocker, error) {
 	if err := EnsureParentDir(path); err != nil {
 		return nil, err
 	}
@@ -55,7 +67,11 @@ func (m *FileLockManager) Acquire(ctx context.Context, path string) (Unlocker, e
 	}
 
 	lock := newLockHandle(path)
-	locked, err := lock.TryLockContext(ctx, lockRetryDelay)
+	tryLock := lock.TryLockContext
+	if shared {
+		tryLock = lock.TryRLockContext
+	}
+	locked, err := tryLock(ctx, lockRetryDelay)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return nil, ErrLockUnavailable

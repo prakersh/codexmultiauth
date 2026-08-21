@@ -39,6 +39,7 @@ type KeyManager interface {
 
 type LockManager interface {
 	Acquire(ctx context.Context, path string) (cmafs.Unlocker, error)
+	AcquireShared(ctx context.Context, path string) (cmafs.Unlocker, error)
 }
 
 type CodexCLI interface {
@@ -105,8 +106,12 @@ func (m *Manager) SetTokenRefresher(refresher TokenRefresher) {
 	m.tokenRefresher = refresher
 }
 
+func (m *Manager) lockPath() string {
+	return m.paths.LockDir + "/cma.lock"
+}
+
 func (m *Manager) withMutationLock(ctx context.Context, fn func() error) error {
-	lockPath := m.paths.LockDir + "/cma.lock"
+	lockPath := m.lockPath()
 	lock, err := m.lockManager.Acquire(ctx, lockPath)
 	if err != nil {
 		return err
@@ -157,7 +162,25 @@ func (m *Manager) clearTornState() error {
 	return nil
 }
 
+// loadStateAndVault reads the pair under a shared lock. Reading them unlocked
+// let a reader get past state.json, have a lock-holding mutation commit both
+// files, and then read the new vault: the resulting snapshot references an
+// account whose entry is already gone, which made cma usage hard-error and
+// cma doctor report a torn state that was never on disk.
+//
+// The shared lock admits concurrent readers and only excludes the exclusive
+// lock a mutation takes. Callers already holding that exclusive lock must use
+// loadStateAndVaultLocked instead, or they will deadlock against themselves.
 func (m *Manager) loadStateAndVault(ctx context.Context) (domain.State, store.Vault, []byte, error) {
+	lock, err := m.lockManager.AcquireShared(ctx, m.lockPath())
+	if err != nil {
+		return domain.State{}, store.Vault{}, nil, err
+	}
+	defer func() { _ = lock.Unlock() }()
+	return m.loadStateAndVaultLocked(ctx)
+}
+
+func (m *Manager) loadStateAndVaultLocked(ctx context.Context) (domain.State, store.Vault, []byte, error) {
 	key, _, err := m.keyManager.LoadOrCreate(ctx)
 	if err != nil {
 		return domain.State{}, store.Vault{}, nil, err
@@ -275,8 +298,7 @@ func vaultOnlyRemovesEntries(originalVault []byte, vaultExists bool, next store.
 // half-committed state/vault pair, and so it cannot clear the marker while a
 // mutation is still in flight. Callers must not already hold the lock.
 func (m *Manager) Doctor(ctx context.Context) (string, error) {
-	lockPath := m.paths.LockDir + "/cma.lock"
-	lock, lockErr := m.lockManager.Acquire(ctx, lockPath)
+	lock, lockErr := m.lockManager.Acquire(ctx, m.lockPath())
 	if lockErr != nil {
 		return "", fmt.Errorf("doctor: acquire lock: %w", lockErr)
 	}

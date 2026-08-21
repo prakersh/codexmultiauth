@@ -6,6 +6,7 @@ import (
 
 	"github.com/prakersh/codexmultiauth/internal/app"
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +33,9 @@ func newRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Wipe the passphrase once the command is done with it, so it does
+			// not linger on the heap for the life of the process.
+			defer cmacrypto.Zero(passphrase)
 			policy := domain.ConflictPolicy(conflict)
 			input := app.RestoreInput{
 				Passphrase: passphrase,

@@ -12,12 +12,19 @@ import (
 
 const (
 	EnvelopeVersionV1 = "cma-envelope-v1"
+	// EnvelopeVersionV2 binds the envelope's own metadata into the AEAD as
+	// additional authenticated data. v1 sealed with no AAD, so everything
+	// outside the ciphertext (version, KDF parameters, created_at, and the
+	// metadata map that names the account) could be rewritten and the
+	// ciphertext would still open cleanly. v1 envelopes are still readable;
+	// anything written now is v2.
+	EnvelopeVersionV2 = "cma-envelope-v2"
 	KDFNameArgon2id   = "argon2id"
 	AEADXChaCha20     = "xchacha20poly1305"
 )
 
 var (
-	ErrUnsupportedEnvelopeVersion = errors.New("unsupported envelope version")
+	ErrUnsupportedEnvelopeVersion = errors.New("unsupported envelope version; this file was written by a newer CMA, upgrade to read it")
 	ErrWrongPassphrase            = errors.New("wrong passphrase or corrupted ciphertext")
 	marshalEnvelopeJSON           = json.MarshalIndent
 	unmarshalEnvelopeJSON         = json.Unmarshal
@@ -48,6 +55,13 @@ type Envelope struct {
 }
 
 func EncryptWithKey(plaintext, key []byte, metadata map[string]string) (Envelope, error) {
+	return seal(plaintext, key, metadata, nil)
+}
+
+// seal builds the envelope's public fields first, derives the AAD from them,
+// and only then encrypts, so the ciphertext is cryptographically tied to the
+// metadata that travels alongside it.
+func seal(plaintext, key []byte, metadata map[string]string, kdf *KDFMetadata) (Envelope, error) {
 	if len(key) != KeyLength {
 		return Envelope{}, fmt.Errorf("encrypt with key: key length must be %d", KeyLength)
 	}
@@ -59,21 +73,60 @@ func EncryptWithKey(plaintext, key []byte, metadata map[string]string) (Envelope
 	if err != nil {
 		return Envelope{}, fmt.Errorf("create xchacha20poly1305: %w", err)
 	}
-	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
-	return Envelope{
-		Version:   EnvelopeVersionV1,
-		CreatedAt: time.Now().UTC(),
+
+	envelope := Envelope{
+		Version:   EnvelopeVersionV2,
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+		KDF:       kdf,
 		AEAD: AEADMetadata{
 			Name:  AEADXChaCha20,
 			Nonce: base64.StdEncoding.EncodeToString(nonce),
 		},
-		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
-		Metadata:   metadata,
-	}, nil
+		Metadata: metadata,
+	}
+
+	aad, err := envelopeAAD(envelope)
+	if err != nil {
+		return Envelope{}, err
+	}
+	envelope.Ciphertext = base64.StdEncoding.EncodeToString(aead.Seal(nil, nonce, plaintext, aad))
+	return envelope, nil
+}
+
+// envelopeAAD produces the authenticated-but-unencrypted bytes for an
+// envelope. Every field it covers is a string or an integer, and the metadata
+// map is marshalled by encoding/json which sorts keys, so the encoding is
+// stable across a write/read round trip. created_at is truncated to the second
+// at seal time for the same reason.
+func envelopeAAD(envelope Envelope) ([]byte, error) {
+	if envelope.Version != EnvelopeVersionV2 {
+		// v1 sealed without AAD; keep it that way so old files still open.
+		return nil, nil
+	}
+	payload := struct {
+		Version   string            `json:"version"`
+		CreatedAt string            `json:"created_at"`
+		AEAD      string            `json:"aead"`
+		Nonce     string            `json:"nonce"`
+		KDF       *KDFMetadata      `json:"kdf,omitempty"`
+		Metadata  map[string]string `json:"metadata,omitempty"`
+	}{
+		Version:   envelope.Version,
+		CreatedAt: envelope.CreatedAt.UTC().Format(time.RFC3339),
+		AEAD:      envelope.AEAD.Name,
+		Nonce:     envelope.AEAD.Nonce,
+		KDF:       envelope.KDF,
+		Metadata:  envelope.Metadata,
+	}
+	aad, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("build envelope aad: %w", err)
+	}
+	return aad, nil
 }
 
 func DecryptWithKey(envelope Envelope, key []byte) ([]byte, error) {
-	if envelope.Version != EnvelopeVersionV1 {
+	if envelope.Version != EnvelopeVersionV1 && envelope.Version != EnvelopeVersionV2 {
 		return nil, ErrUnsupportedEnvelopeVersion
 	}
 	if len(key) != KeyLength {
@@ -95,7 +148,13 @@ func DecryptWithKey(envelope Envelope, key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create xchacha20poly1305: %w", err)
 	}
-	plaintext, err := aead.Open(nil, nonce, ciphertext, nil)
+	aad, err := envelopeAAD(envelope)
+	if err != nil {
+		return nil, err
+	}
+	// Any edit to the bound metadata changes the AAD, so Open fails here the
+	// same way a wrong key does.
+	plaintext, err := aead.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, ErrWrongPassphrase
 	}
@@ -114,17 +173,21 @@ func EncryptWithPassphrase(plaintext, passphrase []byte, params Argon2idParams, 
 		return Envelope{}, err
 	}
 	key := DeriveKey(passphrase, salt, params)
-	envelope, err := EncryptWithKey(plaintext, key, metadata)
-	if err != nil {
-		return Envelope{}, err
-	}
-	envelope.KDF = &KDFMetadata{
+	defer Zero(key)
+	// The KDF block is built before sealing so it can be bound as AAD; a
+	// tampered iteration count or salt then fails authentication instead of
+	// silently steering key derivation.
+	kdf := &KDFMetadata{
 		Name:        KDFNameArgon2id,
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 		Memory:      params.Memory,
 		Iterations:  params.Iterations,
 		Parallelism: params.Parallelism,
 		KeyLength:   params.KeyLength,
+	}
+	envelope, err := seal(plaintext, key, metadata, kdf)
+	if err != nil {
+		return Envelope{}, err
 	}
 	return envelope, nil
 }
@@ -158,6 +221,7 @@ func DecryptWithPassphrase(envelope Envelope, passphrase []byte) ([]byte, error)
 		return nil, err
 	}
 	key := DeriveKey(passphrase, salt, params)
+	defer Zero(key)
 	return DecryptWithKey(envelope, key)
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 )
 
 type RenameInput struct {
@@ -21,10 +22,12 @@ func (m *Manager) Rename(ctx context.Context, input RenameInput) error {
 	}
 
 	return m.withMutationLock(ctx, func() error {
-		state, vault, key, err := m.loadStateAndVault(ctx)
+		state, vault, key, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
 		}
+		// The vault key is only needed for this operation.
+		defer cmacrypto.Zero(key)
 
 		account, err := domain.ResolveAccount(state.Accounts, input.Selector)
 		if err != nil {

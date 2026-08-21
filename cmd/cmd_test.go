@@ -32,6 +32,7 @@ type fakeService struct {
 	lastNewInput        app.NewInput
 	lastDeleteInput     app.DeleteInput
 	lastBackupInput     app.BackupInput
+	onBackup            func(app.BackupInput)
 	lastRestoreInput    app.RestoreInput
 	lastActivate        string
 	lastUsage           string
@@ -53,14 +54,22 @@ func (f *fakeService) Usage(ctx context.Context, selector string) ([]app.UsageRe
 	return f.usage, nil
 }
 func (f *fakeService) Backup(ctx context.Context, input app.BackupInput) (string, error) {
+	if f.onBackup != nil {
+		f.onBackup(input)
+	}
+	// Copy the passphrase: the command wipes its buffer once it returns, so
+	// holding the caller's slice would record zeros.
+	input.Passphrase = append([]byte(nil), input.Passphrase...)
 	f.lastBackupInput = input
 	return f.backupPath, nil
 }
 func (f *fakeService) InspectBackup(input app.RestoreInput) (backup.Plaintext, []app.RestoreCandidate, error) {
+	input.Passphrase = append([]byte(nil), input.Passphrase...)
 	f.lastRestoreInput = input
 	return f.inspectArtifact, f.inspectCandidates, nil
 }
 func (f *fakeService) Restore(ctx context.Context, input app.RestoreInput) (app.RestoreSummary, error) {
+	input.Passphrase = append([]byte(nil), input.Passphrase...)
 	f.lastRestoreInput = input
 	return f.restoreSummary, nil
 }
@@ -122,9 +131,17 @@ func TestPromptHelpersAndSplitAliases(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "default-value", text)
 
+	// The passphrase prompt reads bytes straight from the terminal now, so it
+	// is driven through readPassword rather than the survey stub.
+	originalStdinIsTerminal := stdinIsTerminal
+	originalReadPassword := readPassword
+	stdinIsTerminal = func() bool { return true }
+	readPassword = func() ([]byte, error) { return []byte("hunter2"), nil }
 	password, err := promptPassword("password")
+	stdinIsTerminal = originalStdinIsTerminal
+	readPassword = originalReadPassword
 	require.NoError(t, err)
-	require.Empty(t, password)
+	require.Equal(t, []byte("hunter2"), password)
 
 	confirmed, err := promptConfirm("confirm", false)
 	require.NoError(t, err)
@@ -565,4 +582,30 @@ func TestSaveSkipsOptionalPromptsWithoutTerminal(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, output, "Saved saved")
 	require.Empty(t, svc.lastSaveInput.DisplayName)
+}
+
+// TestBackupWipesPassphraseAfterUse covers the zeroization gap: the passphrase
+// buffer must not survive the command that used it.
+func TestBackupWipesPassphraseAfterUse(t *testing.T) {
+	originalService := newService
+	defer func() { newService = originalService }()
+
+	var captured []byte
+	svc := &fakeService{backupPath: "/tmp/out.cma.bak"}
+	newService = func() (service, error) { return svc, nil }
+
+	cmd := newBackupCmd()
+	cmd.SetArgs([]string{"pass:supersecret", "nightly", "--allow-plain-pass-arg"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	// Capture the live slice the command passes down, before it is wiped.
+	svc.onBackup = func(input app.BackupInput) { captured = input.Passphrase }
+	require.NoError(t, cmd.Execute())
+
+	require.NotEmpty(t, captured)
+	for i, b := range captured {
+		require.Zero(t, b, "passphrase byte %d survived the command", i)
+	}
 }

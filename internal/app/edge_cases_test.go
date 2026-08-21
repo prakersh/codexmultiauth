@@ -102,6 +102,10 @@ func (n noopLockManager) Acquire(ctx context.Context, path string) (cmafs.Unlock
 	return noopUnlocker{}, nil
 }
 
+func (n noopLockManager) AcquireShared(ctx context.Context, path string) (cmafs.Unlocker, error) {
+	return n.Acquire(ctx, path)
+}
+
 func TestActivateRollbackOnFingerprintMismatch(t *testing.T) {
 	manager, authStore, _ := newTestManager(t)
 	ctx := context.Background()

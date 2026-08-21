@@ -26,6 +26,10 @@ func (f fakeLock) TryLockContext(ctx context.Context, retryDelay time.Duration) 
 	return f.locked, f.lockErr
 }
 
+func (f fakeLock) TryRLockContext(ctx context.Context, retryDelay time.Duration) (bool, error) {
+	return f.TryLockContext(ctx, retryDelay)
+}
+
 func (f fakeLock) Unlock() error { return f.unlockErr }
 func (f fakeLock) Path() string  { return f.path }
 

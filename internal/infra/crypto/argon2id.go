@@ -57,3 +57,18 @@ func DeriveKey(passphrase, salt []byte, params Argon2idParams) []byte {
 	}
 	return argon2.IDKey(passphrase, salt, params.Iterations, params.Memory, params.Parallelism, uint32(keyLength))
 }
+
+// Zero overwrites b in place. It is used on derived keys, vault keys, and
+// passphrase buffers once they are no longer needed, so a core dump, a swapped
+// page, or a /proc/<pid>/mem read is less likely to catch them.
+//
+// This is a best-effort measure, not a guarantee. Go's garbage collector may
+// move or copy a slice's backing array before this runs, and values that pass
+// through an immutable string cannot be wiped at all, which is why the
+// passphrase prompt reads into a byte slice rather than a string.
+func Zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+	runtime.KeepAlive(b)
+}

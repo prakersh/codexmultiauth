@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
 )
 
@@ -37,10 +38,12 @@ func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 			return fmt.Errorf("codex auth changed before it could be saved: another command wrote %s while this one was running", m.paths.CodexAuth)
 		}
 
-		state, vault, key, err := m.loadStateAndVault(ctx)
+		state, vault, key, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
 		}
+		// The vault key is only needed for this operation.
+		defer cmacrypto.Zero(key)
 
 		aliases := uniqueStrings(input.Aliases)
 		for index, account := range state.Accounts {

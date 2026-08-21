@@ -87,9 +87,14 @@ func (r *VaultRepo) Save(vault Vault, key []byte) error {
 	}
 	file := vaultFile{Version: vault.Version}
 	for _, entry := range vault.Entries {
+		// These travel in plaintext beside the ciphertext, so bind them as
+		// AEAD metadata: relabelling an entry to another account, or editing
+		// its fingerprint, now fails to decrypt instead of being caught only
+		// later (or not at all).
 		envelope, err := crypto.EncryptWithKey(entry.Payload, key, map[string]string{
-			"account_id": entry.AccountID,
-			"source":     entry.Source,
+			"account_id":  entry.AccountID,
+			"source":      entry.Source,
+			"fingerprint": entry.Fingerprint,
 		})
 		if err != nil {
 			return fmt.Errorf("encrypt vault entry %s: %w", entry.AccountID, err)

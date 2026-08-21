@@ -2,12 +2,16 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
 )
 
@@ -73,9 +77,23 @@ func (m *Manager) ensureFreshAuth(ctx context.Context, accountID string, reason 
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Re-read the on-disk auth inside the per-account critical section: if
-	// another process already refreshed while we were waiting, pick up their
-	// result instead of issuing a duplicate refresh.
+	// The mutex above only serializes goroutines inside this process. A
+	// refresh token is single-use, so two processes reading the same on-disk
+	// token would both POST it: one gets a 400 and reports a spurious failure
+	// for a healthy account, or both succeed inside the server's grace window
+	// and the later write persists a superseded token. Take a per-account file
+	// lock so the load-refresh-persist sequence is serialized across processes
+	// too. It is per-account, so different accounts still refresh in parallel,
+	// and it is always taken before the main mutation lock, never after.
+	fileLock, lockErr := m.lockManager.Acquire(ctx, m.refreshLockPath(accountID))
+	if lockErr != nil {
+		return store.CodexAuth{}, false, fmt.Errorf("acquire refresh lock for %s: %w", accountID, lockErr)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
+	// Re-read the on-disk auth inside the critical section: if another
+	// process already refreshed while we were waiting, pick up their result
+	// instead of issuing a duplicate refresh.
 	auth, err := m.loadAccountAuth(ctx, accountID)
 	if err != nil {
 		return store.CodexAuth{}, false, err
@@ -108,6 +126,13 @@ func (m *Manager) ensureFreshAuth(ctx context.Context, accountID string, reason 
 	return refreshed, true, nil
 }
 
+// refreshLockPath names a per-account lock file. The account ID is hashed so
+// the name is a fixed, filesystem-safe length regardless of the ID's contents.
+func (m *Manager) refreshLockPath(accountID string) string {
+	sum := sha256.Sum256([]byte(accountID))
+	return filepath.Join(m.paths.LockDir, "refresh-"+hex.EncodeToString(sum[:8])+".lock")
+}
+
 func (m *Manager) loadAccountAuth(ctx context.Context, accountID string) (store.CodexAuth, error) {
 	_, vault, _, err := m.loadStateAndVault(ctx)
 	if err != nil {
@@ -126,10 +151,12 @@ func (m *Manager) loadAccountAuth(ctx context.Context, accountID string) (store.
 
 func (m *Manager) persistRefreshedAuth(ctx context.Context, accountID string, payload []byte, fingerprint string) error {
 	return m.withMutationLock(ctx, func() error {
-		state, vault, key, err := m.loadStateAndVault(ctx)
+		state, vault, key, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
 		}
+		// The vault key is only needed for this operation.
+		defer cmacrypto.Zero(key)
 
 		updated := false
 		for i, entry := range vault.Entries {

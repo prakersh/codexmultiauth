@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/prakersh/codexmultiauth/internal/app"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +26,9 @@ func newBackupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Wipe the passphrase once the command is done with it, so it does
+			// not linger on the heap for the life of the process.
+			defer cmacrypto.Zero(passphrase)
 			path, err := manager.Backup(context.Background(), app.BackupInput{
 				Passphrase: passphrase,
 				Target:     args[1],

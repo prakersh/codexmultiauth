@@ -17,7 +17,7 @@ type BackupInput struct {
 func (m *Manager) Backup(ctx context.Context, input BackupInput) (string, error) {
 	var outputPath string
 	err := m.withMutationLock(ctx, func() error {
-		state, vault, _, err := m.loadStateAndVault(ctx)
+		state, vault, _, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
 		}

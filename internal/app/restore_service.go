@@ -7,6 +7,7 @@ import (
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	"github.com/prakersh/codexmultiauth/internal/infra/backup"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 )
 
 type RestoreInput struct {
@@ -37,10 +38,12 @@ func (m *Manager) InspectBackup(input RestoreInput) (backup.Plaintext, []Restore
 func (m *Manager) Restore(ctx context.Context, input RestoreInput) (RestoreSummary, error) {
 	var summary RestoreSummary
 	err := m.withMutationLock(ctx, func() error {
-		state, vault, key, err := m.loadStateAndVault(ctx)
+		state, vault, key, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
 		}
+		// The vault key is only needed for this operation.
+		defer cmacrypto.Zero(key)
 		artifact, err := backup.Read(m.resolveRestorePath(input.Source), input.Passphrase)
 		if err != nil {
 			return err
