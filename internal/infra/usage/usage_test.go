@@ -536,3 +536,34 @@ func TestFetchSendsAccountScopeHeader(t *testing.T) {
 	require.Equal(t, "acct-123", got.Get("X-Account-Id"))
 	require.Empty(t, got.Get("ChatClaude-Account-Id"))
 }
+
+// TestParseResponseReachedTypeObject covers the workspace-plan shape, where
+// rate_limit_reached_type arrives as an object instead of a string. Decoding it
+// as a string failed the whole unmarshal, so a fully populated response was
+// discarded and the account fell back to best-effort with no quota data.
+func TestParseResponseReachedTypeObject(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"team",
+		"rate_limit":{"allowed":false,"limit_reached":true,"primary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"rate_limit_reached_type":{"type":"workspace_member_credits_depleted","details":null}
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, domain.UsageConfidenceConfirmed, summary.Confidence)
+	require.True(t, summary.LimitReached)
+	require.Len(t, summary.Quotas, 1)
+	require.NotNil(t, summary.Quotas[0].UsedPercent)
+	require.InDelta(t, 100.0, *summary.Quotas[0].UsedPercent, 0.001)
+	require.Equal(t, int64(604800), summary.Quotas[0].WindowSeconds)
+}
+
+// TestParseResponseReachedTypeNull keeps the absent case from being read as a
+// limit that was reached.
+func TestParseResponseReachedTypeNull(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"plus",
+		"rate_limit":{"primary_window":{"used_percent":24,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"rate_limit_reached_type":null
+	}`))
+	require.NoError(t, err)
+	require.False(t, summary.LimitReached)
+}
