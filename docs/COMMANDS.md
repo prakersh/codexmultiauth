@@ -197,6 +197,17 @@ cma activate 1
 cma activate work
 ```
 
+Before overwriting the auth store, `activate` saves the credentials currently
+in it back to the account that owns them. Codex rotates its refresh token as it
+runs and invalidates the one it replaces, so without this the account being
+switched away from would be left holding a spent token and coming back to it
+would need a browser login.
+
+The capture only happens when the live credentials clearly belong to the active
+account, matched on the Codex account id. If a different account was logged in
+manually, or the auth store holds an API key with no account id, the capture is
+skipped rather than risk storing one account's tokens under another's name.
+
 ### `cma delete <selector>`
 
 Delete a saved account. If the account is active, CMA asks for confirmation.

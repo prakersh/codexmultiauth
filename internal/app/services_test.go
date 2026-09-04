@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/prakersh/codexmultiauth/internal/domain"
+	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	cmafs "github.com/prakersh/codexmultiauth/internal/infra/fs"
 	"github.com/prakersh/codexmultiauth/internal/infra/paths"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
@@ -544,4 +545,85 @@ func TestSaveRejectsChangedAuthUnderExpectFingerprint(t *testing.T) {
 	require.NoError(t, err)
 	_, err = manager.Save(ctx, SaveInput{DisplayName: "work2", ExpectFingerprint: record.Fingerprint})
 	require.NoError(t, err)
+}
+
+// TestActivateCapturesRotatedTokensOfOutgoingAccount reproduces issue #5.
+// Codex rotates the refresh token in auth.json as it runs and invalidates the
+// one it replaced, so a vault snapshot goes stale the moment Codex refreshes.
+// Activating away used to overwrite auth.json without capturing it, leaving
+// the outgoing account holding a spent token and forcing a browser login to
+// come back.
+func TestActivateCapturesRotatedTokensOfOutgoingAccount(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// Save account A, then account B, so B ends up active.
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a1","refresh_token":"r1","account_id":"codex-a"}}`), domain.AuthStoreFile)
+	saveA, err := manager.Save(ctx, SaveInput{DisplayName: "acct-a"})
+	require.NoError(t, err)
+
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"b1","refresh_token":"r1-b","account_id":"codex-b"}}`), domain.AuthStoreFile)
+	saveB, err := manager.Save(ctx, SaveInput{DisplayName: "acct-b"})
+	require.NoError(t, err)
+
+	_, err = manager.Activate(ctx, saveB.Account.ID)
+	require.NoError(t, err)
+
+	// Codex runs and rotates B's refresh token in place.
+	rotated := []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"b2-rotated","refresh_token":"r2-b-rotated","account_id":"codex-b"}}`)
+	authStore.setRaw(t, rotated, domain.AuthStoreFile)
+
+	// Switch to A. B's rotated credentials must be captured, not discarded.
+	_, err = manager.Activate(ctx, saveA.Account.ID)
+	require.NoError(t, err)
+
+	stored := vaultPayloadFor(t, manager, ctx, saveB.Account.ID)
+	require.Contains(t, string(stored), "r2-b-rotated",
+		"activating away discarded the token Codex rotated for the outgoing account")
+	require.NotContains(t, string(stored), "r1-b", "the spent token must not survive")
+
+	// Switching back must hand Codex the rotated credentials.
+	_, err = manager.Activate(ctx, saveB.Account.ID)
+	require.NoError(t, err)
+	current, err := authStore.Load(ctx)
+	require.NoError(t, err)
+	require.Contains(t, string(current.Canonical), "r2-b-rotated")
+}
+
+// TestActivateDoesNotCaptureADifferentCodexAccount guards the capture: if the
+// user logged in manually as somebody else, those credentials must not be
+// written into the active account's vault slot.
+func TestActivateDoesNotCaptureADifferentCodexAccount(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a1","refresh_token":"r1","account_id":"codex-a"}}`), domain.AuthStoreFile)
+	saveA, err := manager.Save(ctx, SaveInput{DisplayName: "acct-a"})
+	require.NoError(t, err)
+
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"b1","refresh_token":"r1-b","account_id":"codex-b"}}`), domain.AuthStoreFile)
+	saveB, err := manager.Save(ctx, SaveInput{DisplayName: "acct-b"})
+	require.NoError(t, err)
+	_, err = manager.Activate(ctx, saveA.Account.ID)
+	require.NoError(t, err)
+
+	// A stranger's credentials land in auth.json while acct-a is active.
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"z1","refresh_token":"r1-z","account_id":"codex-stranger"}}`), domain.AuthStoreFile)
+
+	_, err = manager.Activate(ctx, saveB.Account.ID)
+	require.NoError(t, err)
+
+	stored := vaultPayloadFor(t, manager, ctx, saveA.Account.ID)
+	require.NotContains(t, string(stored), "codex-stranger", "another account's tokens were written into acct-a")
+	require.Contains(t, string(stored), "r1")
+}
+
+func vaultPayloadFor(t *testing.T, manager *Manager, ctx context.Context, accountID string) []byte {
+	t.Helper()
+	_, vault, key, err := manager.loadStateAndVault(ctx)
+	require.NoError(t, err)
+	defer cmacrypto.Zero(key)
+	entry, ok := findVaultEntry(vault, accountID)
+	require.True(t, ok, "vault entry missing for %s", accountID)
+	return entry.Payload
 }
