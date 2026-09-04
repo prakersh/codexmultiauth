@@ -611,3 +611,62 @@ func TestRefreshSurfacesOAuthError(t *testing.T) {
 	require.Contains(t, err.Error(), "already used")
 	require.NotContains(t, err.Error(), "spent", "the refresh token must never appear in the error")
 }
+
+// TestParseResponseReachedTypeObject covers the workspace-plan shape, where
+// rate_limit_reached_type arrives as an object instead of a string. Decoding it
+// as a string failed the whole unmarshal, so a fully populated response was
+// discarded and the account fell back to best-effort with no quota data.
+func TestParseResponseReachedTypeObject(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"team",
+		"rate_limit":{"allowed":false,"limit_reached":true,"primary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"rate_limit_reached_type":{"type":"workspace_member_credits_depleted","details":null}
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, domain.UsageConfidenceConfirmed, summary.Confidence)
+	require.True(t, summary.LimitReached)
+	require.Len(t, summary.Quotas, 1)
+	require.NotNil(t, summary.Quotas[0].UsedPercent)
+	require.InDelta(t, 100.0, *summary.Quotas[0].UsedPercent, 0.001)
+	require.Equal(t, int64(604800), summary.Quotas[0].WindowSeconds)
+}
+
+// TestParseResponseReachedTypeNull keeps the absent case from being read as a
+// limit that was reached.
+func TestParseResponseReachedTypeNull(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"plus",
+		"rate_limit":{"primary_window":{"used_percent":24,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"rate_limit_reached_type":null
+	}`))
+	require.NoError(t, err)
+	require.False(t, summary.LimitReached)
+}
+
+// TestParseResponseReachedTypeUnknownShape keeps one advisory field from
+// sinking the whole response if the API changes shape again. Every quota in
+// the payload must still be reported.
+func TestParseResponseReachedTypeUnknownShape(t *testing.T) {
+	for _, shape := range []string{`123`, `["a","b"]`, `true`} {
+		summary, err := ParseResponse([]byte(`{
+			"plan_type":"team",
+			"rate_limit":{"primary_window":{"used_percent":24,"limit_window_seconds":604800,"reset_at":1900000000}},
+			"rate_limit_reached_type":` + shape + `
+		}`))
+		require.NoError(t, err, "shape %s failed the whole parse", shape)
+		require.Equal(t, domain.UsageConfidenceConfirmed, summary.Confidence)
+		require.Len(t, summary.Quotas, 1, "shape %s lost the quota data", shape)
+		require.False(t, summary.LimitReached, "shape %s must not imply a reached limit", shape)
+	}
+}
+
+// TestParseResponseReachedTypeStringStillWorks pins the individual-plan shape.
+func TestParseResponseReachedTypeStringStillWorks(t *testing.T) {
+	summary, err := ParseResponse([]byte(`{
+		"plan_type":"plus",
+		"rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_at":1900000000}},
+		"rate_limit_reached_type":"weekly"
+	}`))
+	require.NoError(t, err)
+	require.True(t, summary.LimitReached)
+}

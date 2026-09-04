@@ -19,7 +19,44 @@ type response struct {
 	CodeReviewRateLimit  *rateLimit      `json:"code_review_rate_limit,omitempty"`
 	AdditionalRateLimits json.RawMessage `json:"additional_rate_limits,omitempty"`
 	Credits              *credits        `json:"credits,omitempty"`
-	RateLimitReachedType string          `json:"rate_limit_reached_type,omitempty"`
+	RateLimitReachedType reachedType     `json:"rate_limit_reached_type,omitempty"`
+}
+
+// reachedType carries rate_limit_reached_type, which the API sends in more
+// than one shape: a bare string on individual plans, and an object of the form
+// {"type": "...", "details": ...} on workspace plans. Decoding it as a plain
+// string made the whole usage response fail to unmarshal for workspace
+// accounts, so a fully populated payload was discarded and the account
+// degraded to best-effort with no quota data.
+//
+// An unrecognized shape is ignored rather than failing the parse. Rejecting
+// the whole response over one advisory field is the bug this type exists to
+// fix, so a future shape must not reintroduce it.
+type reachedType struct {
+	Type    string
+	Details json.RawMessage
+}
+
+func (r *reachedType) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		r.Type = asString
+		return nil
+	}
+	var asObject struct {
+		Type    string          `json:"type"`
+		Details json.RawMessage `json:"details,omitempty"`
+	}
+	if err := json.Unmarshal(data, &asObject); err == nil {
+		r.Type = asObject.Type
+		r.Details = asObject.Details
+		return nil
+	}
+	return nil
 }
 
 type rateLimit struct {
@@ -67,7 +104,7 @@ func ParseResponse(data []byte) (domain.UsageSummary, error) {
 		PlanType:     resp.PlanType,
 		Confidence:   domain.UsageConfidenceConfirmed,
 		FetchedAt:    time.Now().UTC(),
-		LimitReached: resp.RateLimit.LimitReached || strings.TrimSpace(resp.RateLimitReachedType) != "",
+		LimitReached: resp.RateLimit.LimitReached || strings.TrimSpace(resp.RateLimitReachedType.Type) != "",
 	}
 	if resp.RateLimit.Allowed != nil && !*resp.RateLimit.Allowed {
 		summary.LimitReached = true
