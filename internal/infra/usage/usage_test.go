@@ -536,3 +536,78 @@ func TestFetchSendsAccountScopeHeader(t *testing.T) {
 	require.Equal(t, "acct-123", got.Get("X-Account-Id"))
 	require.Empty(t, got.Get("ChatClaude-Account-Id"))
 }
+
+func jwtWithExp(exp time.Time) string {
+	claims, _ := json.Marshal(map[string]any{"exp": exp.Unix()})
+	return "h." + base64.RawURLEncoding.EncodeToString(claims) + ".s"
+}
+
+// TestMaybeRefreshMeasuresAccessTokenNotIDToken covers the token burn bug.
+// Codex issues the id_token with a one hour life and the access token with a
+// ten day life. Measuring the id_token meant every command run more than an
+// hour after login attempted a refresh, and each attempt spends a single-use
+// refresh token.
+func TestMaybeRefreshMeasuresAccessTokenNotIDToken(t *testing.T) {
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+
+	var posts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts++
+		_, _ = w.Write([]byte(`{"access_token":"new","refresh_token":"rt2"}`))
+	}))
+	defer server.Close()
+	refresher := &TokenRefresher{OAuthURL: server.URL, Now: func() time.Time { return now }}
+
+	// The realistic steady state: id_token long expired, access token healthy.
+	healthy := store.CodexAuth{Tokens: &store.CodexTokens{
+		IDToken:      jwtWithExp(now.Add(-11 * time.Hour)),
+		AccessToken:  jwtWithExp(now.Add(9 * 24 * time.Hour)),
+		RefreshToken: "rt",
+	}}
+	_, changed, err := refresher.MaybeRefresh(context.Background(), healthy)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Zero(t, posts, "refreshed while the access token was valid for nine more days")
+
+	// An access token inside the refresh-ahead window must still refresh.
+	expiring := store.CodexAuth{Tokens: &store.CodexTokens{
+		IDToken:      jwtWithExp(now.Add(-11 * time.Hour)),
+		AccessToken:  jwtWithExp(now.Add(time.Hour)),
+		RefreshToken: "rt",
+	}}
+	_, changed, err = refresher.MaybeRefresh(context.Background(), expiring)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, 1, posts)
+
+	// With no readable access token expiry, fall back to the id_token.
+	posts = 0
+	legacy := store.CodexAuth{Tokens: &store.CodexTokens{
+		IDToken:      jwtWithExp(now.Add(-time.Hour)),
+		AccessToken:  "not-a-jwt",
+		RefreshToken: "rt",
+	}}
+	_, _, err = refresher.MaybeRefresh(context.Background(), legacy)
+	require.NoError(t, err)
+	require.Equal(t, 1, posts, "id_token fallback must still drive a refresh")
+}
+
+// TestRefreshSurfacesOAuthError checks that a failure says why. It previously
+// reported only "status 401", which did not distinguish a spent token from a
+// wrong client id.
+func TestRefreshSurfacesOAuthError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"refresh token is expired or already used"}`))
+	}))
+	defer server.Close()
+
+	refresher := &TokenRefresher{OAuthURL: server.URL}
+	_, _, err := refresher.Refresh(context.Background(), store.CodexAuth{
+		Tokens: &store.CodexTokens{RefreshToken: "spent"},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid_grant")
+	require.Contains(t, err.Error(), "already used")
+	require.NotContains(t, err.Error(), "spent", "the refresh token must never appear in the error")
+}

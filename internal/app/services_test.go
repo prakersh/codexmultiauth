@@ -627,3 +627,33 @@ func vaultPayloadFor(t *testing.T, manager *Manager, ctx context.Context, accoun
 	require.True(t, ok, "vault entry missing for %s", accountID)
 	return entry.Payload
 }
+
+// TestLoadAccountAuthPrefersLiveFileForActiveAccount covers the other half of
+// the stale-snapshot problem. Codex rotates the token in auth.json in place, so
+// the vault copy can name a refresh token that has already been spent.
+// Deciding freshness against that copy meant refreshing a dead token and
+// failing an account whose live credentials were fine.
+func TestLoadAccountAuthPrefersLiveFileForActiveAccount(t *testing.T) {
+	manager, authStore, _ := newTestManager(t)
+	ctx := context.Background()
+
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a1","refresh_token":"r1","account_id":"codex-a"}}`), domain.AuthStoreFile)
+	saved, err := manager.Save(ctx, SaveInput{DisplayName: "acct"})
+	require.NoError(t, err)
+	_, err = manager.Activate(ctx, saved.Account.ID)
+	require.NoError(t, err)
+
+	// Codex rotates the live file; the vault still holds the spent token.
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"a2","refresh_token":"r2-rotated","account_id":"codex-a"}}`), domain.AuthStoreFile)
+
+	auth, err := manager.loadAccountAuth(ctx, saved.Account.ID)
+	require.NoError(t, err)
+	require.Equal(t, "r2-rotated", auth.Tokens.RefreshToken,
+		"the active account must be judged on its live credentials, not a spent snapshot")
+
+	// A different Codex account in the live file is ignored.
+	authStore.setRaw(t, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"z","refresh_token":"r-stranger","account_id":"codex-stranger"}}`), domain.AuthStoreFile)
+	auth, err = manager.loadAccountAuth(ctx, saved.Account.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, "r-stranger", auth.Tokens.RefreshToken, "another account's live tokens must not be adopted")
+}

@@ -133,8 +133,17 @@ func (m *Manager) refreshLockPath(accountID string) string {
 	return filepath.Join(m.paths.LockDir, "refresh-"+hex.EncodeToString(sum[:8])+".lock")
 }
 
+// loadAccountAuth returns the credentials to reason about for an account.
+//
+// For the active account the live auth store wins over the vault copy. Codex
+// rotates the token in place as it runs, so the vault snapshot can name a
+// refresh token that has already been spent; deciding against it meant
+// refreshing a dead token and failing an account whose live credentials were
+// perfectly good. The live file is only preferred when it names the same Codex
+// account, so a manual login as somebody else is ignored here just as it is on
+// activate.
 func (m *Manager) loadAccountAuth(ctx context.Context, accountID string) (store.CodexAuth, error) {
-	_, vault, _, err := m.loadStateAndVault(ctx)
+	state, vault, _, err := m.loadStateAndVault(ctx)
 	if err != nil {
 		return store.CodexAuth{}, err
 	}
@@ -142,6 +151,17 @@ func (m *Manager) loadAccountAuth(ctx context.Context, accountID string) (store.
 	if !ok {
 		return store.CodexAuth{}, fmt.Errorf("vault entry missing for account %q", accountID)
 	}
+
+	if state.ActiveAccountID == accountID {
+		if live, liveErr := m.authStore.Load(ctx); liveErr == nil {
+			if live.Fingerprint != entry.Fingerprint && sameCodexIdentity(live.Canonical, entry.Payload) {
+				if auth, _, parseErr := store.NormalizeAndValidateAuth(live.Canonical); parseErr == nil {
+					return auth, nil
+				}
+			}
+		}
+	}
+
 	auth, _, err := store.NormalizeAndValidateAuth(entry.Payload)
 	if err != nil {
 		return store.CodexAuth{}, err

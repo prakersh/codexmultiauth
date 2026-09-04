@@ -84,7 +84,7 @@ func (r *TokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (sto
 		return auth, false, fmt.Errorf("read refresh response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return auth, false, fmt.Errorf("refresh token request failed: status %d", resp.StatusCode)
+		return auth, false, fmt.Errorf("refresh token request failed: status %d%s", resp.StatusCode, oauthErrorDetail(body))
 	}
 
 	var payload refreshResponse
@@ -116,6 +116,29 @@ func (r *TokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (sto
 	return updated, true, nil
 }
 
+// oauthErrorDetail pulls the standard OAuth error fields out of a failure
+// response. Only those two fields are surfaced, never the raw body, so a
+// server that echoes request material cannot leak it into logs. Without this
+// a failure reported only "status 401", which said nothing about whether the
+// token was rejected, the client was wrong, or the grant was expired.
+func oauthErrorDetail(body []byte) string {
+	var payload struct {
+		Error       string `json:"error"`
+		Description string `json:"error_description"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	switch {
+	case payload.Error != "" && payload.Description != "":
+		return fmt.Sprintf(" (%s: %s)", payload.Error, payload.Description)
+	case payload.Error != "":
+		return fmt.Sprintf(" (%s)", payload.Error)
+	default:
+		return ""
+	}
+}
+
 func (r *TokenRefresher) client() *http.Client {
 	if r.HTTPClient != nil {
 		return r.HTTPClient
@@ -137,15 +160,29 @@ func (r *TokenRefresher) oauthURL() string {
 	return defaultOAuthURL
 }
 
+// tokenExpiringSoon reports whether the credentials need refreshing before
+// they stop working.
+//
+// This measures the access token, which is what actually authorizes API calls
+// and which Codex issues with a ten day lifetime. It previously measured the
+// id_token, which Codex issues with a one hour lifetime, so every command run
+// more than an hour after login decided a refresh was due. Each of those
+// attempts spends a single-use refresh token, so ordinary use burned through
+// tokens and eventually left accounts unable to refresh at all.
+//
+// The id_token is still consulted when the access token carries no readable
+// expiry, so auth files that only have a parseable id_token keep working.
 func tokenExpiringSoon(auth store.CodexAuth, threshold time.Time) bool {
 	if auth.Tokens == nil {
 		return false
 	}
-	expiry, ok := jwtExpiry(auth.Tokens.IDToken)
-	if !ok {
-		return false
+	if expiry, ok := jwtExpiry(auth.Tokens.AccessToken); ok {
+		return !expiry.After(threshold)
 	}
-	return !expiry.After(threshold)
+	if expiry, ok := jwtExpiry(auth.Tokens.IDToken); ok {
+		return !expiry.After(threshold)
+	}
+	return false
 }
 
 func jwtExpiry(token string) (time.Time, bool) {
