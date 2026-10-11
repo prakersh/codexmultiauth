@@ -14,14 +14,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		width, _ := m.size()
+		m.input.Width = max(1, width-3)
+		m.input.SetCursor(m.input.Position())
 		return m, nil
 	case accountsMsg:
 		if msg.err != nil {
 			m.message = msg.err.Error()
 		} else {
+			selectedID := m.selectedSelector()
 			m.accounts = msg.accounts
-			if m.selected >= len(m.accounts) && len(m.accounts) > 0 {
-				m.selected = len(m.accounts) - 1
+			m.selected = max(0, min(m.selected, len(m.accounts)-1))
+			for i, account := range m.accounts {
+				if selectedID != "" && account.Account.ID == selectedID {
+					m.selected = i
+					break
+				}
 			}
 		}
 		return m, nil
@@ -29,7 +37,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.message = msg.err.Error()
 		} else {
-			m.usage = msg.usage
+			for _, incoming := range msg.usage {
+				replaced := false
+				for i, cached := range m.usage {
+					if sameUsageAccount(cached, incoming) {
+						m.usage[i] = incoming
+						replaced = true
+						break
+					}
+				}
+				if !replaced {
+					m.usage = append(m.usage, incoming)
+				}
+			}
 			m.message = "Usage refreshed"
 		}
 		return m, nil
@@ -53,6 +73,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadAccounts()
 	case tea.KeyMsg:
+		if m.terminalTooSmall() {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				// Cancellation remains available while the terminal is too
+				// small to safely review a destructive action or submission.
+				if m.mode == modeDeleteConfirm {
+					return m.updateDeleteConfirm(msg)
+				}
+				if m.mode == modeRestoreConflict {
+					return m.updateRestoreConflict(msg)
+				}
+				m.clearRestore()
+				m.input.Blur()
+				m.input.EchoMode = textinput.EchoNormal
+			}
+			return m, nil
+		}
 		switch m.mode {
 		case modeMain:
 			return m.updateMain(msg)
@@ -65,6 +104,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			return m.updateInput(msg)
 		}
+	}
+	if m.mode == modeBackupName || m.mode == modeBackupPass || m.mode == modeRestoreSource || m.mode == modeRestorePass {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -85,6 +129,7 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadAccounts()
 	case "u":
 		if selector := m.selectedSelector(); selector != "" {
+			m.message = "Fetching usage for " + m.selectedDisplayName()
 			return m, m.loadUsage(selector)
 		}
 	case "s":
@@ -106,12 +151,12 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeBackupName
 		m.input.SetValue(backupDefaultName())
 		m.input.Placeholder = "backup name"
-		m.input.Focus()
+		return m, m.input.Focus()
 	case "R":
 		m.mode = modeRestoreSource
 		m.input.SetValue("")
 		m.input.Placeholder = "backup name or absolute path"
-		m.input.Focus()
+		return m, m.input.Focus()
 	}
 	return m, nil
 }
@@ -134,8 +179,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeBackupPass
 			m.input.Placeholder = "backup passphrase"
 			m.input.EchoMode = textinput.EchoPassword
-			m.input.Focus()
-			return m, nil
+			return m, m.input.Focus()
 		case modeBackupPass:
 			m.mode = modeMain
 			m.input.EchoMode = textinput.EchoNormal
@@ -145,8 +189,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeRestorePass
 			m.input.Placeholder = "restore passphrase"
 			m.input.EchoMode = textinput.EchoPassword
-			m.input.Focus()
-			return m, nil
+			return m, m.input.Focus()
 		case modeRestorePass:
 			m.input.EchoMode = textinput.EchoNormal
 			m.message = fmt.Sprintf("Inspecting %s", m.pendingRestore)

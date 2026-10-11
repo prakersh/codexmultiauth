@@ -109,6 +109,12 @@ go build -o cma .
 # Limits view for all accounts
 ./cma limits
 
+# Piped output is plain text with one row per account
+./cma limits | grep 'work'
+
+# Structured output for scripts
+./cma limits --json
+
 # Auto-pick the account with the best urgency-weighted remaining quota
 ./cma auto
 ```
@@ -127,6 +133,9 @@ go build -o cma .
 ```
 
 ### 4) Launch the TUI
+
+The TUI adapts its panels to the terminal width and height, including live
+resizing. It needs at least 20 columns and 8 rows to display interactive actions.
 
 ```bash
 ./cma tui

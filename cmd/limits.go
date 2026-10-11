@@ -2,19 +2,23 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
+	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/prakersh/codexmultiauth/internal/app"
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func newLimitsCmd() *cobra.Command {
-	var dull bool
+	var dull, plain, jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "limits",
@@ -29,12 +33,22 @@ func newLimitsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printLimitsTable(cmd, results, dull)
+			if jsonOutput {
+				return printLimitsJSON(cmd, results)
+			}
+			if plain {
+				printLimitsTableAtWidth(cmd, results, true, 0)
+			} else {
+				printLimitsTable(cmd, results, dull)
+			}
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&dull, "dull", false, "Use no colors")
+	cmd.Flags().BoolVar(&plain, "plain", false, "Use a plain table with one row per account")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output account identities and usage as JSON")
+	cmd.MarkFlagsMutuallyExclusive("plain", "json")
 
 	return cmd
 }
@@ -63,9 +77,9 @@ func quotaKey(quota domain.UsageQuota) string {
 // is not itself a limit, such as "Review Requests", is used verbatim so the
 // heading does not read "REVIEW REQUESTS LIMIT".
 func columnHeaders(quota domain.UsageQuota) (valueHeader, resetHeader string) {
-	label := strings.TrimSpace(quota.DisplayName)
+	label := strings.TrimSpace(cleanLimitText(quota.DisplayName))
 	if label == "" {
-		label = strings.TrimSpace(quota.Name)
+		label = strings.TrimSpace(cleanLimitText(quota.Name))
 	}
 	if label == "" {
 		return "LIMIT", "RESETS AT"
@@ -130,25 +144,16 @@ func collectQuotaColumns(results []app.UsageResult) []quotaColumn {
 	return columns
 }
 
-// Caps for the free-text identity columns. Everything else sizes to content.
-// These keep a row with one quota pair inside a normal terminal; a vault
-// spanning several distinct windows will still be wider than 80 columns,
-// which is inherent to showing every limit an account reports.
-const (
-	maxAccountWidth = 16
-	maxUserWidth    = 24
-)
-
-// truncateCell shortens a value to limit runes, marking the cut with "..." so
-// the table stays inside a normal terminal width.
+// truncateCell measures terminal cells, including wide and combining glyphs.
 func truncateCell(value string, limit int) string {
-	if displayWidth(value) <= limit {
-		return value
+	if limit <= 0 {
+		return ""
 	}
-	if limit <= 3 {
-		return string([]rune(value)[:limit])
+	tail := "..."
+	if limit <= len(tail) {
+		tail = ""
 	}
-	return string([]rune(value)[:limit-3]) + "..."
+	return ansi.Truncate(value, limit, tail)
 }
 
 // cell holds a rendered value plus the color it should carry, so widths can be
@@ -159,6 +164,24 @@ type cell struct {
 }
 
 func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) {
+	width := 0
+	if output, ok := cmd.OutOrStdout().(interface{ Fd() uintptr }); ok && term.IsTerminal(int(output.Fd())) {
+		width, _, _ = term.GetSize(int(output.Fd()))
+	}
+	_, noColor := os.LookupEnv("NO_COLOR")
+	dull = dull || width == 0 || noColor || os.Getenv("TERM") == "dumb"
+	printLimitsTableAtWidth(cmd, results, dull, width)
+}
+
+func printLimitsTableAtWidth(cmd *cobra.Command, results []app.UsageResult, dull bool, width int) {
+	if width > 0 {
+		printResponsiveLimits(cmd.OutOrStdout(), results, dull, width)
+		return
+	}
+	printLimitsWideTable(cmd, results, true)
+}
+
+func printLimitsWideTable(cmd *cobra.Command, results []app.UsageResult, dull bool) {
 	out := cmd.OutOrStdout()
 
 	reset := "\033[0m"
@@ -186,22 +209,18 @@ func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) 
 
 	rows := make([][]cell, 0, len(results))
 	for _, result := range results {
-		name := result.Account.DisplayName
+		name := cleanLimitText(result.Account.DisplayName)
 		if result.Info.IsActive {
 			name += " *"
 		}
-		// Identity columns are capped so a long name or email cannot push the
-		// row past the terminal width and undo the alignment below. Quota
-		// columns stay uncapped; their values are short and fixed in shape.
-		name = truncateCell(name, maxAccountWidth)
-		plan := result.Usage.PlanType
+		plan := cleanLimitText(result.Usage.PlanType)
 		if plan == "" {
 			plan = "-"
 		}
 
 		row := []cell{
 			{text: name},
-			{text: truncateCell(formatUserShort(result.Info), maxUserWidth)},
+			{text: cleanLimitText(formatUserShort(result.Info))},
 			{text: plan},
 			confidenceCell(result, red, yellow, green, dim),
 		}
@@ -261,10 +280,37 @@ func printLimitsTable(cmd *cobra.Command, results []app.UsageResult, dull bool) 
 	fmt.Fprintf(out, "%s* = active account%s\n", dim, reset)
 }
 
-// displayWidth counts runes rather than bytes so account names or emails with
-// non-ASCII characters do not skew column padding.
 func displayWidth(value string) int {
-	return utf8.RuneCountInString(value)
+	return ansi.StringWidth(value)
+}
+
+// Keep every account on a single physical line in piped output, and prevent
+// account metadata from injecting terminal control sequences.
+func cleanLimitText(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, ansi.Strip(value))
+}
+
+func printLimitsJSON(cmd *cobra.Command, results []app.UsageResult) error {
+	// Export only the public identity and usage fields. Account.Source can
+	// contain arbitrary metadata and is deliberately excluded.
+	type accountUsage struct {
+		ID      string              `json:"id"`
+		Account string              `json:"account"`
+		User    string              `json:"user"`
+		Active  bool                `json:"active"`
+		Usage   domain.UsageSummary `json:"usage"`
+	}
+	rows := make([]accountUsage, 0, len(results))
+	for _, result := range results {
+		rows = append(rows, accountUsage{ID: result.Account.ID, Account: result.Account.DisplayName,
+			User: formatUserShort(result.Info), Active: result.Info.IsActive, Usage: result.Usage})
+	}
+	return json.NewEncoder(cmd.OutOrStdout()).Encode(rows)
 }
 
 // confidenceCell reports where the row's numbers came from. Usage fetch errors

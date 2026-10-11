@@ -86,6 +86,17 @@ cma usage all
 Show limits for all saved accounts with account details, data provenance, and
 reset windows.
 
+In a terminal, the layout adapts to the available width: roomy terminals show
+aligned account and quota columns; narrow terminals show stacked account
+summaries. Quota bars show the percentage left, with the percentage used and
+local reset time below. `--dull` and `NO_COLOR` disable colors.
+
+When stdout is redirected or piped, output is automatically a plain table with
+one row per account, full account names and emails, and percentages used.
+Use `--plain` to request this layout even in a terminal. Scripts should use
+`--json` for structured records containing `id`, `account`, `user`, `active`,
+and `usage`; missing percentages are omitted rather than treated as zero.
+
 Quota columns are discovered from the windows each account reports, so a vault
 mixing free and paid plans shows a monthly pair and a weekly pair, with `-`
 where an account has no window of that kind.
@@ -100,7 +111,10 @@ ambiguous:
 
 ```bash
 cma limits
-cma limits --dull   # no colors, for piping to a file or another program
+cma limits --dull   # responsive layout without colors
+cma limits | grep 'work'   # plain output automatically
+cma limits --plain        # one row per account, even in a terminal
+cma limits --json | jq '.[] | {account, usage}'
 ```
 
 ### `cma refresh`
@@ -286,6 +300,16 @@ Version resolution order:
 ### `cma tui`
 
 Launch the interactive terminal UI.
+
+Accounts and usage appear side by side when both panels fit, and stack in
+narrow terminals. The layout responds to resizing, keeps the selected account
+visible, and reserves space for keyboard controls. Usage belongs to the selected
+account; press `u` to fetch it. Quota bars show the percentage remaining, with
+explicit used percentages and local reset times.
+
+Below 20 columns or 8 rows, the TUI asks you to enlarge the terminal and pauses
+actions until the controls and affected account can be shown safely. `q` and
+`Ctrl+C` still exit; `Esc` cancels an open dialog.
 
 ```bash
 cma tui

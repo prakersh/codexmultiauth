@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/prakersh/codexmultiauth/internal/app"
 	"github.com/prakersh/codexmultiauth/internal/domain"
@@ -94,7 +93,7 @@ type teaProgram interface {
 }
 
 var newProgram = func(m tea.Model) teaProgram {
-	return tea.NewProgram(m)
+	return tea.NewProgram(m, tea.WithAltScreen())
 }
 
 func Run(service Service) error {
@@ -145,21 +144,21 @@ func (m model) inspectBackupCmd(source, passphrase string) tea.Cmd {
 }
 
 func (m model) selectedSelector() string {
-	if len(m.accounts) == 0 || m.selected >= len(m.accounts) {
+	if m.selected < 0 || m.selected >= len(m.accounts) {
 		return ""
 	}
 	return m.accounts[m.selected].Account.ID
 }
 
 func (m model) selectedDisplayName() string {
-	if len(m.accounts) == 0 || m.selected >= len(m.accounts) {
+	if m.selected < 0 || m.selected >= len(m.accounts) {
 		return ""
 	}
 	return m.accounts[m.selected].Account.DisplayName
 }
 
 func (m model) selectedIsActive() bool {
-	if len(m.accounts) == 0 || m.selected >= len(m.accounts) {
+	if m.selected < 0 || m.selected >= len(m.accounts) {
 		return false
 	}
 	return m.accounts[m.selected].IsActive
@@ -346,14 +345,6 @@ func copyDecisions(in map[string]app.RestoreDecision) map[string]app.RestoreDeci
 	}
 	return out
 }
-
-var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	activeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	statusStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
-	footerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("230"))
-)
 
 func backupDefaultName() string {
 	return "backup-" + time.Now().UTC().Format("20060102-150405")
