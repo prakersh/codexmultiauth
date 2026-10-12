@@ -10,6 +10,7 @@ import (
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	infrausage "github.com/prakersh/codexmultiauth/internal/infra/usage"
 )
 
 func (m *Manager) Activate(ctx context.Context, selector string) (domain.Account, error) {
@@ -97,12 +98,28 @@ func (m *Manager) Activate(ctx context.Context, selector string) (domain.Account
 // API-key auth with no account id, the capture is skipped rather than risk
 // writing one account's tokens into another's slot.
 func (m *Manager) captureOutgoingAuth(state domain.State, vault store.Vault, live store.AuthRecord) (domain.State, store.Vault) {
-	if state.ActiveAccountID == "" {
-		return state, vault
-	}
-	entry, ok := findVaultEntry(vault, state.ActiveAccountID)
-	if !ok {
-		return state, vault
+	outgoingID := state.ActiveAccountID
+	entry, ok := findVaultEntry(vault, outgoingID)
+	if !ok || !sameCodexIdentity(live.Canonical, entry.Payload) {
+		// A manual Codex login can make CMA's active-state pointer stale.
+		// Capture a uniquely identified saved user, rather than throwing away
+		// their newer credentials when switching to another account.
+		metadata := infrausage.ExtractAccountMetadata(live.Parsed)
+		if metadata.UserID == "" && metadata.UserEmail == "" {
+			return state, vault
+		}
+		outgoingID = ""
+		for _, candidate := range vault.Entries {
+			if sameCodexIdentity(live.Canonical, candidate.Payload) {
+				if outgoingID != "" {
+					return state, vault // ambiguous existing entries
+				}
+				outgoingID, entry = candidate.AccountID, candidate
+			}
+		}
+		if outgoingID == "" {
+			return state, vault
+		}
 	}
 	if entry.Fingerprint == live.Fingerprint {
 		return state, vault // nothing rotated since the last save
@@ -111,9 +128,9 @@ func (m *Manager) captureOutgoingAuth(state domain.State, vault store.Vault, liv
 		return state, vault
 	}
 
-	vault = upsertVaultEntry(vault, state.ActiveAccountID, live, m.now())
+	vault = upsertVaultEntry(vault, outgoingID, live, m.now())
 	for index, account := range state.Accounts {
-		if account.ID == state.ActiveAccountID {
+		if account.ID == outgoingID {
 			state.Accounts[index].Fingerprint = live.Fingerprint
 			break
 		}
@@ -126,16 +143,35 @@ func (m *Manager) captureOutgoingAuth(state domain.State, vault store.Vault, liv
 // case this needs to accept, and rotation changes the fingerprint.
 func sameCodexIdentity(liveRaw, storedRaw []byte) bool {
 	liveAuth, _, err := store.NormalizeAndValidateAuth(liveRaw)
-	if err != nil || liveAuth.Tokens == nil {
+	if err != nil || liveAuth.Tokens == nil || liveAuth.OpenAIAPIKey != "" {
 		return false
 	}
 	storedAuth, _, err := store.NormalizeAndValidateAuth(storedRaw)
-	if err != nil || storedAuth.Tokens == nil {
+	if err != nil || storedAuth.Tokens == nil || storedAuth.OpenAIAPIKey != "" {
 		return false
 	}
-	liveID := strings.TrimSpace(liveAuth.Tokens.AccountID)
-	storedID := strings.TrimSpace(storedAuth.Tokens.AccountID)
-	return liveID != "" && liveID == storedID
+	live := infrausage.ExtractAccountMetadata(liveAuth)
+	stored := infrausage.ExtractAccountMetadata(storedAuth)
+	if live.CodexAccountID == "" || live.CodexAccountID != stored.CodexAccountID {
+		return false
+	}
+	// A workspace account ID can be shared by multiple people. Never adopt
+	// another person's tokens just because they belong to that workspace.
+	hasUserID := live.UserID != "" && stored.UserID != ""
+	if hasUserID && live.UserID != stored.UserID {
+		return false
+	}
+	hasEmail := live.UserEmail != "" && stored.UserEmail != ""
+	if hasEmail && !strings.EqualFold(live.UserEmail, stored.UserEmail) {
+		return false
+	}
+	if hasUserID || hasEmail {
+		return true
+	}
+	// Legacy auth can lack user claims entirely. An asymmetric set of claims
+	// cannot establish that identity, so only allow this fallback when both
+	// payloads lack user identifiers.
+	return live.UserID == "" && stored.UserID == "" && live.UserEmail == "" && stored.UserEmail == ""
 }
 
 func rollbackAuth(ctx context.Context, authStore AuthStore, existed bool, raw []byte) error {

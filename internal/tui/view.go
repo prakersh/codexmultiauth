@@ -241,9 +241,22 @@ func (m model) usagePanel(width, height int) []string {
 	if confidence == "" {
 		confidence = "unknown"
 	}
+	problem := false
+	if result := m.selectedUsageResult(); result != nil && result.Problem != nil {
+		problem = true
+		if result.Problem.RequiresLogin {
+			confidence = "login required"
+		} else {
+			confidence = "usage error"
+		}
+	}
 	metadata := confidence
 	if usage.PlanType != "" {
-		metadata = "plan: " + usage.PlanType + " | " + confidence
+		if problem {
+			metadata = confidence + " | plan: " + usage.PlanType
+		} else {
+			metadata = "plan: " + usage.PlanType + " | " + confidence
+		}
 	}
 	lines = append(lines, footerStyle.Render(fitText(metadata, width)))
 	if usage.LimitReached {
@@ -315,6 +328,13 @@ func (m model) compactUsagePanel(width, height int) []string {
 		}
 		if usage.LimitReached {
 			status += " limited"
+		}
+		if result := m.selectedUsageResult(); result != nil && result.Problem != nil {
+			if result.Problem.RequiresLogin {
+				status = "login required"
+			} else {
+				status = "usage error"
+			}
 		}
 		nameWidth := width - len("Usage:  | ") - len(status)
 		if nameWidth > 0 {

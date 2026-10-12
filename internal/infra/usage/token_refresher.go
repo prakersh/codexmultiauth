@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -16,10 +15,10 @@ import (
 )
 
 const (
-	defaultOAuthURL     = "https://auth.openai.com/oauth/token"
-	codexOAuthClientID  = "app_EMoamEEZ73f0CkXaXp7hrann"
-	codexOAuthScope     = "openid profile email offline_access"
-	defaultRefreshAhead = 6 * time.Hour
+	defaultOAuthURL        = "https://auth.openai.com/oauth/token"
+	codexOAuthClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
+	defaultRefreshAhead    = 5 * time.Minute
+	defaultRefreshInterval = 8 * 24 * time.Hour
 )
 
 type TokenRefresher struct {
@@ -49,7 +48,7 @@ func (r *TokenRefresher) MaybeRefresh(ctx context.Context, auth store.CodexAuth)
 	if !canRefresh(auth) {
 		return auth, false, nil
 	}
-	if !tokenExpiringSoon(auth, r.now().Add(defaultRefreshAhead)) {
+	if !tokenExpiringSoon(auth, r.now()) {
 		return auth, false, nil
 	}
 	return r.Refresh(ctx, auth)
@@ -60,18 +59,21 @@ func (r *TokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (sto
 		return auth, false, nil
 	}
 
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", auth.Tokens.RefreshToken)
-	form.Set("client_id", codexOAuthClientID)
-	form.Set("scope", codexOAuthScope)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.oauthURL(), strings.NewReader(form.Encode()))
+	// Match Codex's ChatGPT refresh request: JSON with no scope parameter.
+	payload, err := json.Marshal(struct {
+		GrantType    string `json:"grant_type"`
+		ClientID     string `json:"client_id"`
+		RefreshToken string `json:"refresh_token"`
+	}{"refresh_token", codexOAuthClientID, auth.Tokens.RefreshToken})
+	if err != nil {
+		return auth, false, fmt.Errorf("encode refresh request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.oauthURL(), bytes.NewReader(payload))
 	if err != nil {
 		return auth, false, fmt.Errorf("build refresh request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "codex-cli/1.0.0")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "cma")
 
 	resp, err := r.client().Do(req)
 	if err != nil {
@@ -80,27 +82,27 @@ func (r *TokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (sto
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return auth, false, newRequestError("refresh", resp.StatusCode, body)
+	}
 	if err != nil {
 		return auth, false, fmt.Errorf("read refresh response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return auth, false, fmt.Errorf("refresh token request failed: status %d%s", resp.StatusCode, oauthErrorDetail(body))
-	}
 
-	var payload refreshResponse
-	if err := json.Unmarshal(body, &payload); err != nil {
+	var response refreshResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		return auth, false, fmt.Errorf("parse refresh response: %w", err)
 	}
-	if strings.TrimSpace(payload.AccessToken) == "" {
+	if strings.TrimSpace(response.AccessToken) == "" {
 		return auth, false, fmt.Errorf("refresh response missing access_token")
 	}
 
 	updated := cloneAuth(auth)
-	updated.Tokens.AccessToken = strings.TrimSpace(payload.AccessToken)
-	if token := strings.TrimSpace(payload.RefreshToken); token != "" {
+	updated.Tokens.AccessToken = strings.TrimSpace(response.AccessToken)
+	if token := strings.TrimSpace(response.RefreshToken); token != "" {
 		updated.Tokens.RefreshToken = token
 	}
-	if idToken := strings.TrimSpace(payload.IDToken); idToken != "" {
+	if idToken := strings.TrimSpace(response.IDToken); idToken != "" {
 		updated.Tokens.IDToken = idToken
 	}
 	now := r.now().UTC()
@@ -114,29 +116,6 @@ func (r *TokenRefresher) Refresh(ctx context.Context, auth store.CodexAuth) (sto
 		return auth, false, nil
 	}
 	return updated, true, nil
-}
-
-// oauthErrorDetail pulls the standard OAuth error fields out of a failure
-// response. Only those two fields are surfaced, never the raw body, so a
-// server that echoes request material cannot leak it into logs. Without this
-// a failure reported only "status 401", which said nothing about whether the
-// token was rejected, the client was wrong, or the grant was expired.
-func oauthErrorDetail(body []byte) string {
-	var payload struct {
-		Error       string `json:"error"`
-		Description string `json:"error_description"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	switch {
-	case payload.Error != "" && payload.Description != "":
-		return fmt.Sprintf(" (%s: %s)", payload.Error, payload.Description)
-	case payload.Error != "":
-		return fmt.Sprintf(" (%s)", payload.Error)
-	default:
-		return ""
-	}
 }
 
 func (r *TokenRefresher) client() *http.Client {
@@ -160,29 +139,17 @@ func (r *TokenRefresher) oauthURL() string {
 	return defaultOAuthURL
 }
 
-// tokenExpiringSoon reports whether the credentials need refreshing before
-// they stop working.
-//
-// This measures the access token, which is what actually authorizes API calls
-// and which Codex issues with a ten day lifetime. It previously measured the
-// id_token, which Codex issues with a one hour lifetime, so every command run
-// more than an hour after login decided a refresh was due. Each of those
-// attempts spends a single-use refresh token, so ordinary use burned through
-// tokens and eventually left accounts unable to refresh at all.
-//
-// The id_token is still consulted when the access token carries no readable
-// expiry, so auth files that only have a parseable id_token keep working.
-func tokenExpiringSoon(auth store.CodexAuth, threshold time.Time) bool {
+// Match Codex's proactive refresh policy: check access-token expiry, then
+// last_refresh when expiry is unavailable. ID-token expiry does not authorize
+// API calls and must not spend a rotating refresh token.
+func tokenExpiringSoon(auth store.CodexAuth, now time.Time) bool {
 	if auth.Tokens == nil {
 		return false
 	}
 	if expiry, ok := jwtExpiry(auth.Tokens.AccessToken); ok {
-		return !expiry.After(threshold)
+		return !expiry.After(now.Add(defaultRefreshAhead))
 	}
-	if expiry, ok := jwtExpiry(auth.Tokens.IDToken); ok {
-		return !expiry.After(threshold)
-	}
-	return false
+	return auth.LastRefresh != nil && auth.LastRefresh.Before(now.Add(-defaultRefreshInterval))
 }
 
 func jwtExpiry(token string) (time.Time, bool) {

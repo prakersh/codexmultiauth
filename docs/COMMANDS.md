@@ -86,10 +86,11 @@ cma usage all
 Show limits for all saved accounts with account details, data provenance, and
 reset windows.
 
-In a terminal, the layout adapts to the available width: roomy terminals show
-aligned account and quota columns; narrow terminals show stacked account
-summaries. Quota bars show the percentage left, with the percentage used and
-local reset time below. `--dull` and `NO_COLOR` disable colors.
+In a terminal, complete accounts appear on one row whenever their identity,
+quota values, and reset times fit. The layout uses the available terminal
+width, adding used percentages and quota bars when space permits. Narrow
+terminals wrap only the fields that need another line. Quota values are labeled
+as left or used, and reset times are local. `--dull` and `NO_COLOR` disable colors.
 
 When stdout is redirected or piped, output is automatically a plain table with
 one row per account, full account names and emails, and percentages used.
@@ -108,6 +109,21 @@ ambiguous:
 - `cached`: derived from the stored token, no API response
 - `none`: no usage data at all
 - `limited`: the API reports this account is currently rate limited
+- `auth`: credentials were rejected and a new sign-in is needed
+- `denied`: the usage API returned HTTP 403 for this account
+- `error`: live usage could not be fetched; the detail explains the failure
+- `live!`: quota data is live, but credential renewal reported a warning
+
+Authentication failures include a safe HTTP status or recognized error code,
+rather than appearing only as `cached`. JSON records include an optional
+`problem` object with `code`, `message`, `status_code`, and `requires_login`.
+Error descriptions and response bodies are not exported.
+
+For a usage HTTP 401, CMA reloads matching Codex credentials, then attempts one
+refresh and retry. Permanent refresh rejection requires a renewed sign-in;
+repeating requests cannot repair an expired, reused, or revoked refresh token.
+Re-login updates an existing account when its user and account identity match.
+Accounts in the same workspace remain separate when their user identities differ.
 
 ```bash
 cma limits

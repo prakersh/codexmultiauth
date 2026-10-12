@@ -66,6 +66,9 @@ func printUsageResults(cmd *cobra.Command, results []app.UsageResult) {
 			fmt.Fprintf(out, "  last used: %s\n", formatUsageTime(*result.Account.LastUsedAt))
 		}
 		fmt.Fprintf(out, "  confidence: %s\n", result.Usage.Confidence)
+		if result.Problem != nil {
+			fmt.Fprintf(out, "  problem: %s\n", cleanLimitText(result.Problem.Message))
+		}
 		if !result.Usage.FetchedAt.IsZero() {
 			fmt.Fprintf(out, "  fetched: %s\n", formatUsageTime(result.Usage.FetchedAt))
 		}

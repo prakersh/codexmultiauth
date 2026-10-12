@@ -115,6 +115,9 @@ go build -o cma .
 # Structured output for scripts
 ./cma limits --json
 
+# Renew a rejected login using the same account in the browser
+./cma login --name work
+
 # Auto-pick the account with the best urgency-weighted remaining quota
 ./cma auto
 ```

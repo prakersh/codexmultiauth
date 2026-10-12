@@ -48,6 +48,7 @@ func (c *Client) Fetch(ctx context.Context, auth store.CodexAuth) (domain.UsageS
 		}
 		req.Header.Set("Authorization", "Bearer "+auth.Tokens.AccessToken)
 		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "cma")
 		if auth.Tokens.AccountID != "" {
 			req.Header.Set("X-Account-Id", auth.Tokens.AccountID)
 			// The API scopes the response to this header and echoes the
@@ -58,22 +59,19 @@ func (c *Client) Fetch(ctx context.Context, auth store.CodexAuth) (domain.UsageS
 		}
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
-			lastErr = err
-			continue
+			return domain.UsageSummary{}, err
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		resp.Body.Close()
-		if readErr != nil {
-			lastErr = readErr
-			continue
-		}
 		if resp.StatusCode == http.StatusNotFound {
-			lastErr = fmt.Errorf("usage endpoint %s returned 404", endpoint)
+			lastErr = newRequestError("usage", resp.StatusCode, body)
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("usage endpoint %s returned %d", endpoint, resp.StatusCode)
-			continue
+			return domain.UsageSummary{}, newRequestError("usage", resp.StatusCode, body)
+		}
+		if readErr != nil {
+			return domain.UsageSummary{}, readErr
 		}
 		return ParseResponse(body)
 	}

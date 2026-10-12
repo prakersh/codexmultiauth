@@ -13,6 +13,7 @@ import (
 type AccountMetadata struct {
 	AuthMode       string
 	CodexAccountID string
+	UserID         string
 	UserName       string
 	UserEmail      string
 }
@@ -35,6 +36,7 @@ func BestEffortSummary(auth store.CodexAuth) domain.UsageSummary {
 func ExtractAccountMetadata(auth store.CodexAuth) AccountMetadata {
 	metadata := AccountMetadata{
 		AuthMode: strings.TrimSpace(auth.AuthMode),
+		UserID:   extractUserID(auth),
 	}
 	if metadata.AuthMode == "" {
 		switch {
@@ -65,6 +67,27 @@ func ExtractAccountMetadata(auth store.CodexAuth) AccountMetadata {
 	}
 
 	return metadata
+}
+
+// Workspace account IDs can be shared by different users. Prefer the canonical
+// ChatGPT user ID across both tokens before falling back to an issuer subject.
+func extractUserID(auth store.CodexAuth) string {
+	subject := ""
+	for _, token := range tokensForClaims(auth) {
+		claims := parseJWTClaims(token)
+		if authClaims, ok := claims["https://api.openai.com/auth"].(map[string]any); ok {
+			if id := firstNonEmptyClaim(authClaims, "chatgpt_user_id", "user_id"); id != "" {
+				return id
+			}
+		}
+		if id := firstNonEmptyClaim(claims, "chatgpt_user_id", "user_id"); id != "" {
+			return id
+		}
+		if subject == "" {
+			subject = firstNonEmptyClaim(claims, "sub")
+		}
+	}
+	return subject
 }
 
 func extractPlanType(auth store.CodexAuth) string {

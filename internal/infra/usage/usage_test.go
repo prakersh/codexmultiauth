@@ -110,7 +110,9 @@ func TestClientFetchNon200AndMalformedResponse(t *testing.T) {
 			Tokens: &store.CodexTokens{AccessToken: "token", AccountID: "acc"},
 		})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "returned 403")
+		var requestErr *RequestError
+		require.ErrorAs(t, err, &requestErr)
+		require.Equal(t, http.StatusForbidden, requestErr.StatusCode)
 	})
 
 	t.Run("malformed json after fallback", func(t *testing.T) {
@@ -259,11 +261,12 @@ func TestTokenRefresherRefreshSuccess(t *testing.T) {
 	now := time.Date(2026, 3, 14, 15, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
-		require.NoError(t, r.ParseForm())
-		require.Equal(t, "refresh_token", r.Form.Get("grant_type"))
-		require.Equal(t, "refresh-old", r.Form.Get("refresh_token"))
-		require.Equal(t, codexOAuthClientID, r.Form.Get("client_id"))
-		require.Equal(t, codexOAuthScope, r.Form.Get("scope"))
+		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var payload map[string]string
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.Equal(t, map[string]string{
+			"grant_type": "refresh_token", "refresh_token": "refresh-old", "client_id": codexOAuthClientID,
+		}, payload)
 		_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","id_token":"id-new","expires_in":3600}`))
 	}))
 	defer server.Close()
@@ -274,7 +277,7 @@ func TestTokenRefresherRefreshSuccess(t *testing.T) {
 	refresher.HTTPClient = server.Client()
 
 	auth := store.CodexAuth{Tokens: &store.CodexTokens{
-		AccessToken:  "access-old",
+		AccessToken:  buildIDTokenWithExp(t, now.Add(time.Minute)),
 		RefreshToken: "refresh-old",
 		IDToken:      buildIDTokenWithExp(t, now.Add(time.Hour)),
 		AccountID:    "acc-1",
@@ -572,7 +575,7 @@ func TestMaybeRefreshMeasuresAccessTokenNotIDToken(t *testing.T) {
 	// An access token inside the refresh-ahead window must still refresh.
 	expiring := store.CodexAuth{Tokens: &store.CodexTokens{
 		IDToken:      jwtWithExp(now.Add(-11 * time.Hour)),
-		AccessToken:  jwtWithExp(now.Add(time.Hour)),
+		AccessToken:  jwtWithExp(now.Add(time.Minute)),
 		RefreshToken: "rt",
 	}}
 	_, changed, err = refresher.MaybeRefresh(context.Background(), expiring)
@@ -580,25 +583,25 @@ func TestMaybeRefreshMeasuresAccessTokenNotIDToken(t *testing.T) {
 	require.True(t, changed)
 	require.Equal(t, 1, posts)
 
-	// With no readable access token expiry, fall back to the id_token.
+	// With no readable access token expiry, follow Codex's last_refresh age.
 	posts = 0
+	lastRefresh := now.Add(-9 * 24 * time.Hour)
 	legacy := store.CodexAuth{Tokens: &store.CodexTokens{
 		IDToken:      jwtWithExp(now.Add(-time.Hour)),
 		AccessToken:  "not-a-jwt",
 		RefreshToken: "rt",
-	}}
+	}, LastRefresh: &lastRefresh}
 	_, _, err = refresher.MaybeRefresh(context.Background(), legacy)
 	require.NoError(t, err)
-	require.Equal(t, 1, posts, "id_token fallback must still drive a refresh")
+	require.Equal(t, 1, posts, "old last_refresh must drive a refresh when access token expiry is unavailable")
 }
 
-// TestRefreshSurfacesOAuthError checks that a failure says why. It previously
-// reported only "status 401", which did not distinguish a spent token from a
-// wrong client id.
+// OAuth error descriptions can echo credentials. Only recognized machine
+// codes are safe to expose to callers.
 func TestRefreshSurfacesOAuthError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"refresh token is expired or already used"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"refresh token spent is expired or already used"}`))
 	}))
 	defer server.Close()
 
@@ -608,7 +611,7 @@ func TestRefreshSurfacesOAuthError(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid_grant")
-	require.Contains(t, err.Error(), "already used")
+	require.NotContains(t, err.Error(), "already used")
 	require.NotContains(t, err.Error(), "spent", "the refresh token must never appear in the error")
 }
 

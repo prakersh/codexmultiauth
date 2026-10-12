@@ -198,6 +198,10 @@ func printLimitsWideTable(cmd *cobra.Command, results []app.UsageResult, dull bo
 	columns := collectQuotaColumns(results)
 
 	headers := []string{"ACCOUNT", "USER", "PLAN", "DATA"}
+	withProblem := false
+	for _, result := range results {
+		withProblem = withProblem || result.Problem != nil
+	}
 	for _, column := range columns {
 		headers = append(headers, column.valueHeader, column.resetHeader)
 	}
@@ -205,6 +209,9 @@ func printLimitsWideTable(cmd *cobra.Command, results []app.UsageResult, dull bo
 	// stays recognizable instead of collapsing to three columns.
 	if len(columns) == 0 {
 		headers = append(headers, "LIMIT", "RESETS AT")
+	}
+	if withProblem {
+		headers = append(headers, "DETAIL")
 	}
 
 	rows := make([][]cell, 0, len(results))
@@ -244,6 +251,13 @@ func printLimitsWideTable(cmd *cobra.Command, results []app.UsageResult, dull bo
 		}
 		if len(columns) == 0 {
 			row = append(row, cell{text: "-", color: dim}, cell{text: "-"})
+		}
+		if withProblem {
+			detail := "-"
+			if result.Problem != nil {
+				detail = cleanLimitText(result.Problem.Message)
+			}
+			row = append(row, cell{text: detail})
 		}
 		rows = append(rows, row)
 	}
@@ -304,11 +318,12 @@ func printLimitsJSON(cmd *cobra.Command, results []app.UsageResult) error {
 		User    string              `json:"user"`
 		Active  bool                `json:"active"`
 		Usage   domain.UsageSummary `json:"usage"`
+		Problem *app.UsageProblem   `json:"problem,omitempty"`
 	}
 	rows := make([]accountUsage, 0, len(results))
 	for _, result := range results {
 		rows = append(rows, accountUsage{ID: result.Account.ID, Account: result.Account.DisplayName,
-			User: formatUserShort(result.Info), Active: result.Info.IsActive, Usage: result.Usage})
+			User: formatUserShort(result.Info), Active: result.Info.IsActive, Usage: result.Usage, Problem: result.Problem})
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(rows)
 }
@@ -318,6 +333,18 @@ func printLimitsJSON(cmd *cobra.Command, results []app.UsageResult) error {
 // all-"-" row indistinguishable between "nothing consumed" and "never reached
 // the API".
 func confidenceCell(result app.UsageResult, red, yellow, green, dim string) cell {
+	if result.Problem != nil {
+		if result.Usage.Confidence == domain.UsageConfidenceConfirmed {
+			return cell{text: "live!", color: yellow}
+		}
+		if result.Problem.RequiresLogin {
+			return cell{text: "auth", color: red}
+		}
+		if result.Problem.StatusCode == 403 {
+			return cell{text: "denied", color: red}
+		}
+		return cell{text: "error", color: yellow}
+	}
 	if result.Usage.LimitReached {
 		return cell{text: "limited", color: red}
 	}

@@ -765,6 +765,24 @@ func TestNarrowRestoreReviewShowsPolicyAndTarget(t *testing.T) {
 	require.Contains(t, view, "Esc")
 }
 
+func TestUsageAuthenticationProblemIsVisibleAtEachLayout(t *testing.T) {
+	for _, size := range [][2]int{{120, 28}, {76, 12}, {20, 8}} {
+		account := domain.Account{ID: "one", DisplayName: "work"}
+		m := model{input: textInput(), width: size[0], height: size[1], accounts: []app.ListedAccount{{Account: account}}}
+		next, _ := m.Update(usageMsg{usage: []app.UsageResult{{Account: account,
+			Usage: domain.UsageSummary{Confidence: domain.UsageConfidenceBestEffort, PlanType: "plus"},
+			Problem: &app.UsageProblem{RequiresLogin: true, StatusCode: 401, Code: "refresh_token_expired",
+				Message: "refresh token request failed: status 401; sign in again."},
+		}}})
+		view := ansi.Strip(next.View())
+		require.Contains(t, view, "login required")
+		require.NotContains(t, view, "Usage refreshed")
+		for _, line := range strings.Split(view, "\n") {
+			require.LessOrEqual(t, ansi.StringWidth(line), size[0])
+		}
+	}
+}
+
 func TestCompactUsageKeepsConfidenceAndLimitState(t *testing.T) {
 	used := 100.0
 	for _, confidence := range []domain.UsageConfidence{domain.UsageConfidenceConfirmed, domain.UsageConfidenceBestEffort, domain.UsageConfidenceUnknown} {

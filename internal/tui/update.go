@@ -51,6 +51,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.message = "Usage refreshed"
+			for _, incoming := range msg.usage {
+				if incoming.Problem != nil {
+					m.message = incoming.Account.DisplayName + ": " + incoming.Problem.Message
+					break
+				}
+			}
 		}
 		return m, nil
 	case inspectMsg:

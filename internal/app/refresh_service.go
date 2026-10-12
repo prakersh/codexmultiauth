@@ -33,6 +33,12 @@ type RefreshResult struct {
 	Err       error
 }
 
+type accountAuthSnapshot struct {
+	auth             store.CodexAuth
+	fingerprint      string
+	vaultFingerprint string
+}
+
 // refreshMutexFor returns a lazily-created mutex keyed by account ID. It is
 // used by ensureFreshAuth to serialize concurrent refreshes for the same
 // account within a single process so that two goroutines never POST a
@@ -94,10 +100,11 @@ func (m *Manager) ensureFreshAuth(ctx context.Context, accountID string, reason 
 	// Re-read the on-disk auth inside the critical section: if another
 	// process already refreshed while we were waiting, pick up their result
 	// instead of issuing a duplicate refresh.
-	auth, err := m.loadAccountAuth(ctx, accountID)
+	snapshot, err := m.loadAccountAuthSnapshot(ctx, accountID)
 	if err != nil {
 		return store.CodexAuth{}, false, err
 	}
+	auth := snapshot.auth
 
 	var refreshed store.CodexAuth
 	var changed bool
@@ -120,8 +127,15 @@ func (m *Manager) ensureFreshAuth(ctx context.Context, accountID string, reason 
 		return auth, false, err
 	}
 
-	if err := m.persistRefreshedAuth(ctx, accountID, payload, fingerprint); err != nil {
+	persisted, err := m.persistRefreshedAuth(ctx, accountID, payload, fingerprint, snapshot)
+	if err != nil {
 		return auth, false, err
+	}
+	if !persisted {
+		// Codex or another mutation replaced this snapshot while the request
+		// was in flight. Reuse the newer credentials instead of overwriting them.
+		current, err := m.loadAccountAuth(ctx, accountID)
+		return current, false, err
 	}
 	return refreshed, true, nil
 }
@@ -135,7 +149,7 @@ func (m *Manager) refreshLockPath(accountID string) string {
 
 // loadAccountAuth returns the credentials to reason about for an account.
 //
-// For the active account the live auth store wins over the vault copy. Codex
+// A matching live auth store wins over the vault copy. Codex
 // rotates the token in place as it runs, so the vault snapshot can name a
 // refresh token that has already been spent; deciding against it meant
 // refreshing a dead token and failing an account whose live credentials were
@@ -143,34 +157,39 @@ func (m *Manager) refreshLockPath(accountID string) string {
 // account, so a manual login as somebody else is ignored here just as it is on
 // activate.
 func (m *Manager) loadAccountAuth(ctx context.Context, accountID string) (store.CodexAuth, error) {
-	state, vault, _, err := m.loadStateAndVault(ctx)
+	snapshot, err := m.loadAccountAuthSnapshot(ctx, accountID)
+	return snapshot.auth, err
+}
+
+func (m *Manager) loadAccountAuthSnapshot(ctx context.Context, accountID string) (accountAuthSnapshot, error) {
+	_, vault, key, err := m.loadStateAndVault(ctx)
 	if err != nil {
-		return store.CodexAuth{}, err
+		return accountAuthSnapshot{}, err
 	}
+	defer cmacrypto.Zero(key)
 	entry, ok := findVaultEntry(vault, accountID)
 	if !ok {
-		return store.CodexAuth{}, fmt.Errorf("vault entry missing for account %q", accountID)
+		return accountAuthSnapshot{}, fmt.Errorf("vault entry missing for account %q", accountID)
 	}
 
-	if state.ActiveAccountID == accountID {
-		if live, liveErr := m.authStore.Load(ctx); liveErr == nil {
-			if live.Fingerprint != entry.Fingerprint && sameCodexIdentity(live.Canonical, entry.Payload) {
-				if auth, _, parseErr := store.NormalizeAndValidateAuth(live.Canonical); parseErr == nil {
-					return auth, nil
-				}
+	if live, liveErr := m.authStore.Load(ctx); liveErr == nil {
+		if sameCodexIdentity(live.Canonical, entry.Payload) {
+			if auth, _, parseErr := store.NormalizeAndValidateAuth(live.Canonical); parseErr == nil {
+				return accountAuthSnapshot{auth: auth, fingerprint: live.Fingerprint, vaultFingerprint: entry.Fingerprint}, nil
 			}
 		}
 	}
 
 	auth, _, err := store.NormalizeAndValidateAuth(entry.Payload)
 	if err != nil {
-		return store.CodexAuth{}, err
+		return accountAuthSnapshot{}, err
 	}
-	return auth, nil
+	return accountAuthSnapshot{auth: auth, fingerprint: entry.Fingerprint, vaultFingerprint: entry.Fingerprint}, nil
 }
 
-func (m *Manager) persistRefreshedAuth(ctx context.Context, accountID string, payload []byte, fingerprint string) error {
-	return m.withMutationLock(ctx, func() error {
+func (m *Manager) persistRefreshedAuth(ctx context.Context, accountID string, payload []byte, fingerprint string, expected accountAuthSnapshot) (bool, error) {
+	persisted := false
+	err := m.withMutationLock(ctx, func() error {
 		state, vault, key, err := m.loadStateAndVaultLocked(ctx)
 		if err != nil {
 			return err
@@ -178,23 +197,37 @@ func (m *Manager) persistRefreshedAuth(ctx context.Context, accountID string, pa
 		// The vault key is only needed for this operation.
 		defer cmacrypto.Zero(key)
 
-		updated := false
+		entryIndex := -1
 		for i, entry := range vault.Entries {
 			if entry.AccountID == accountID {
-				// If another caller already landed the same refresh, no-op.
-				if entry.Fingerprint == fingerprint {
-					return nil
-				}
-				vault.Entries[i].Payload = payload
-				vault.Entries[i].Fingerprint = fingerprint
-				vault.Entries[i].SavedAt = m.now()
-				updated = true
+				entryIndex = i
 				break
 			}
 		}
-		if !updated {
+		if entryIndex == -1 {
 			return fmt.Errorf("vault entry for account %q disappeared before refresh persist", accountID)
 		}
+		entry := vault.Entries[entryIndex]
+		current, loadErr := m.authStore.Load(ctx)
+		if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+			return loadErr
+		}
+		liveMatches := loadErr == nil && sameCodexIdentity(current.Canonical, payload)
+		if liveMatches && current.Fingerprint != expected.fingerprint {
+			// Do not clobber a token Codex rotated during the server request.
+			return nil
+		}
+		if entry.Fingerprint != expected.vaultFingerprint && entry.Fingerprint != fingerprint {
+			// Save or another mutation replaced this account's vault snapshot.
+			return nil
+		}
+		if entry.Fingerprint == fingerprint && !liveMatches {
+			persisted = true
+			return nil
+		}
+		vault.Entries[entryIndex].Payload = payload
+		vault.Entries[entryIndex].Fingerprint = fingerprint
+		vault.Entries[entryIndex].SavedAt = m.now()
 
 		for i, account := range state.Accounts {
 			if account.ID == accountID {
@@ -203,30 +236,27 @@ func (m *Manager) persistRefreshedAuth(ctx context.Context, accountID string, pa
 			}
 		}
 
-		if state.ActiveAccountID == accountID {
-			var originalAuth store.AuthRecord
-			originalExists := false
-			current, loadErr := m.authStore.Load(ctx)
-			if loadErr == nil {
-				originalAuth = current
-				originalExists = true
-			} else if !errors.Is(loadErr, os.ErrNotExist) {
-				return loadErr
-			}
+		if liveMatches {
 			if err := m.authStore.Save(ctx, payload); err != nil {
 				return err
 			}
 			if err := m.commitStateAndVault(state, vault, key); err != nil {
-				rollbackErr := rollbackAuth(ctx, m.authStore, originalExists, originalAuth.Canonical)
+				rollbackErr := rollbackAuth(ctx, m.authStore, true, current.Canonical)
 				if rollbackErr != nil {
 					return errors.Join(err, rollbackErr)
 				}
 				return err
 			}
+			persisted = true
 			return nil
 		}
-		return m.commitStateAndVault(state, vault, key)
+		if err := m.commitStateAndVault(state, vault, key); err != nil {
+			return err
+		}
+		persisted = true
+		return nil
 	})
+	return persisted, err
 }
 
 // Refresh forces a token refresh for the selected accounts. Pass "all" (or

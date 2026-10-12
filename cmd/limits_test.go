@@ -250,8 +250,8 @@ func TestLimitsAdaptsToTerminalWidth(t *testing.T) {
 			plain := ansi.Strip(out.String())
 			require.Contains(t, plain, "Codex Limits")
 			if width >= 32 {
-				require.Contains(t, plain, "100.0%")
-				require.Contains(t, plain, "42.5%")
+				require.Contains(t, plain, "0.0% left")
+				require.Contains(t, plain, "57.5% left")
 				require.Contains(t, plain, "Sep 20 02:50")
 			}
 		}

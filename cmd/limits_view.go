@@ -35,31 +35,26 @@ func printResponsiveLimits(out io.Writer, results []app.UsageResult, dull bool, 
 	s := newLimitsStyles(dull)
 	// Reserve a cell to avoid an automatic wrap at the terminal's right edge.
 	width = max(1, width-1)
-	write := func(line string) { fmt.Fprintln(out, ansi.Wrap(line, width, "")) }
-	write(s.paint("Codex Limits", s.bold))
-	write(s.paint(time.Now().In(time.Local).Format("2006-01-02 15:04 MST"), s.dim))
+	columns := collectQuotaColumns(results)
+	layout, comparison := limitsComparisonLayoutFor(results, columns, width)
+	write := func(line string) {
+		fmt.Fprintln(out, ansi.Wrap(line, width, ""))
+	}
+	title := s.paint("Codex Limits", s.bold)
+	stamp := s.paint(time.Now().In(time.Local).Format("2006-01-02 15:04 MST"), s.dim)
+	if displayWidth(title+"  "+stamp) <= width {
+		write(title + "  " + stamp)
+	} else {
+		write(title)
+		write(stamp)
+	}
 	write("")
 	if len(results) == 0 {
 		write("No saved accounts. Run cma save to add one.")
 		return
 	}
-	columns := collectQuotaColumns(results)
-	// Every quota gets a readable value and a complete reset timestamp.
-	// If that cannot fit, switch the entire layout rather than clipping columns.
-	identityWidth := 24
-	planWidth, dataWidth, quotaWidth := 6, 7, 25
-	for _, result := range results {
-		planWidth = max(planWidth, displayWidth(cleanLimitText(result.Usage.PlanType)))
-	}
-	tableWidth := identityWidth + planWidth + dataWidth + 4 + len(columns)*(quotaWidth+2)
-	if len(columns) > 0 && tableWidth <= width {
-		wanted := identityWidth
-		for _, result := range results {
-			wanted = max(wanted, displayWidth(cleanLimitText(formatUserShort(result.Info))),
-				displayWidth(cleanLimitText(result.Account.DisplayName))+2)
-		}
-		identityWidth = min(40, wanted, identityWidth+width-tableWidth)
-		printLimitsComparison(out, results, columns, s, identityWidth, planWidth, dataWidth, quotaWidth)
+	if comparison {
+		printLimitsComparison(out, results, columns, s, layout)
 	} else {
 		for i, result := range results {
 			if i > 0 {
@@ -69,14 +64,25 @@ func printResponsiveLimits(out io.Writer, results []app.UsageResult, dull bool, 
 			if result.Info.IsActive {
 				name += " [active]"
 			}
-			write(s.paint(name, s.bold))
-			write(cleanLimitText(formatUserShort(result.Info)))
+			user := cleanLimitText(formatUserShort(result.Info))
 			plan := cleanLimitText(result.Usage.PlanType)
 			if plan == "" {
 				plan = "-"
 			}
 			data := confidenceCell(result, s.red, s.yellow, s.green, s.dim)
-			write("Plan: " + plan + "  |  Data: " + s.paint(data.text, data.color))
+			metadata := "Plan: " + plan + "  |  Data: " + s.paint(data.text, data.color)
+			identity := s.paint(name, s.bold) + "  " + user + "  " + metadata
+			if displayWidth(identity) <= width {
+				write(identity)
+			} else {
+				if displayWidth(name+"  "+metadata) <= width {
+					write(s.paint(name, s.bold) + "  " + metadata)
+				} else {
+					write(s.paint(name, s.bold))
+					write(metadata)
+				}
+				write(user)
+			}
 			rendered := false
 			labelWidth := 0
 			for _, quota := range result.Usage.Quotas {
@@ -88,7 +94,6 @@ func printResponsiveLimits(out io.Writer, results []app.UsageResult, dull bool, 
 					if quotaKey(quota) != column.key || quota.UsedPercent == nil {
 						continue
 					}
-					write("")
 					label := cleanLimitText(quota.DisplayName)
 					if strings.TrimSpace(label) == "" {
 						label = cleanLimitText(quota.Name)
@@ -96,86 +101,170 @@ func printResponsiveLimits(out io.Writer, results []app.UsageResult, dull bool, 
 					label = truncateCell(label, labelWidth)
 					prefix := "  " + label + strings.Repeat(" ", labelWidth-displayWidth(label)+2)
 					value := fmt.Sprintf("%.1f%% left", remainingQuota(*quota.UsedPercent))
-					if displayWidth(prefix)+14+1+displayWidth(value) <= width {
-						value = quotaBar(*quota.UsedPercent, 12) + " " + value
-					}
-					write(s.paint(prefix, s.bold) + s.paint(value, percentColor(*quota.UsedPercent, s.red, s.yellow, s.green)))
 					used := fmt.Sprintf("%.1f%% used", *quota.UsedPercent)
 					reset := "resets " + formatResetAt(quota.ResetsAt)
-					if displayWidth(used)+3+displayWidth(reset)+4 <= width {
-						write(s.paint("    "+used+" | "+reset, s.dim))
+					if displayWidth(prefix+value+"  "+used+"  "+reset) <= width {
+						value += "  " + used
+					}
+					if displayWidth(prefix+value+"  "+reset) <= width {
+						if displayWidth(prefix)+15+displayWidth(value+"  "+reset) <= width {
+							value = quotaBar(*quota.UsedPercent, 12) + " " + value
+						}
+						write(s.paint(prefix, s.bold) + s.paint(value, percentColor(*quota.UsedPercent, s.red, s.yellow, s.green)) + s.paint("  "+reset, s.dim))
 					} else {
-						write(s.paint("    "+used, s.dim))
+						write(s.paint(prefix, s.bold) + s.paint(value, percentColor(*quota.UsedPercent, s.red, s.yellow, s.green)))
 						write(s.paint("    "+reset, s.dim))
 					}
 					rendered = true
 				}
 			}
 			if !rendered {
-				write("LIMIT: unavailable")
-				write(s.paint("RESETS AT: -", s.dim))
+				write("LIMIT: unavailable; RESETS AT: -")
 			}
 		}
 	}
 	write("")
-	write(s.paint("Percentages show quota left and used. Reset times are local.", s.dim))
+	write(s.paint("* = active account. Reset times are local.", s.dim))
+	for _, result := range results {
+		if result.Problem != nil {
+			color := s.yellow
+			if result.Problem.RequiresLogin {
+				color = s.red
+			}
+			write(s.paint(cleanLimitText(result.Account.DisplayName+": "+result.Problem.Message), color))
+		}
+	}
 }
 
-func printLimitsComparison(out io.Writer, results []app.UsageResult, columns []quotaColumn, s limitsStyles, identityWidth, planWidth, dataWidth, quotaWidth int) {
-	widths := []int{identityWidth, planWidth, dataWidth}
-	headers := []cell{{text: "ACCOUNT / USER"}, {text: "PLAN"}, {text: "DATA"}}
-	for _, column := range columns {
-		widths = append(widths, quotaWidth)
-		headers = append(headers, cell{text: truncateCell(cleanLimitText(column.valueHeader), quotaWidth)})
+// Fit complete account rows before adding redundant percentages or bars.
+// Available width controls density; there is no centered content-width cap.
+type limitsComparisonLayout struct {
+	headers       []string
+	widths        []int
+	showUsed      bool
+	barWidth, gap int
+}
+
+func (l limitsComparisonLayout) width() int {
+	total := 2 + (len(l.widths)-1)*l.gap
+	for _, width := range l.widths {
+		total += width
 	}
-	// renderRow uses a two-cell inset and one-cell gaps. Account blocks align
-	// below a single header, with secondary details on their own lines.
-	fmt.Fprintln(out, s.paint(renderRow(headers, widths, s.reset), s.bold))
-	fmt.Fprintln(out, s.paint(strings.Repeat("-", rowWidth(widths)), s.dim))
-	for index, result := range results {
-		if index > 0 {
-			fmt.Fprintln(out)
-		}
-		name := cleanLimitText(result.Account.DisplayName)
-		if result.Info.IsActive {
-			name = truncateCell(name, identityWidth-2) + " *"
-		}
-		data := confidenceCell(result, s.red, s.yellow, s.green, s.dim)
-		plan := cleanLimitText(result.Usage.PlanType)
-		if plan == "" {
-			plan = "-"
-		}
-		lines := [][]cell{
-			{{text: truncateCell(name, identityWidth), color: s.bold}, {text: plan}, data},
-			{{text: truncateCell(cleanLimitText(formatUserShort(result.Info)), identityWidth), color: s.dim}, {}, {}},
-			{{}, {}, {}},
-		}
+	return total
+}
+
+func limitsComparisonLayoutFor(results []app.UsageResult, columns []quotaColumn, width int) (limitsComparisonLayout, bool) {
+	measure := func(showUsed bool, barWidth int) limitsComparisonLayout {
+		l := limitsComparisonLayout{headers: []string{"ACCOUNT", "USER", "PLAN", "DATA"}, showUsed: showUsed, barWidth: barWidth, gap: 1}
 		for _, column := range columns {
-			var quota *domain.UsageQuota
-			for i := range result.Usage.Quotas {
-				q := &result.Usage.Quotas[i]
-				if quotaKey(*q) == column.key && q.UsedPercent != nil {
-					quota = q
-					break
-				}
+			label := strings.TrimSuffix(cleanLimitText(column.valueHeader), " LIMIT") + " LEFT"
+			if showUsed {
+				label += " / USED"
 			}
-			if quota == nil {
-				lines[0] = append(lines[0], cell{text: "-", color: s.dim})
-				lines[1] = append(lines[1], cell{})
-				lines[2] = append(lines[2], cell{})
-				continue
-			}
-			used := *quota.UsedPercent
-			lines[0] = append(lines[0], cell{text: quotaBar(used, 10) + fmt.Sprintf(" %.1f%% left", remainingQuota(used)),
-				color: percentColor(used, s.red, s.yellow, s.green)})
-			lines[1] = append(lines[1], cell{text: fmt.Sprintf("%.1f%% used", used), color: s.dim})
-			lines[2] = append(lines[2], cell{text: "resets " + formatResetAt(quota.ResetsAt), color: s.dim})
+			l.headers = append(l.headers, label, "RESETS AT")
 		}
-		for _, line := range lines {
-			fmt.Fprintln(out, renderRow(line, widths, s.reset))
+		l.widths = make([]int, len(l.headers))
+		for i, header := range l.headers {
+			l.widths[i] = displayWidth(header)
+		}
+		for _, result := range results {
+			row := limitsComparisonCells(result, columns, l, limitsStyles{})
+			for i, c := range row {
+				l.widths[i] = max(l.widths[i], displayWidth(c.text))
+			}
+		}
+		return l
+	}
+	layout := measure(false, 0)
+	if layout.width() > width {
+		return layout, false
+	}
+	if full := measure(true, 0); full.width() <= width {
+		layout = full
+	}
+	if len(columns) > 0 {
+		barWidth := min(32, (width-layout.width())/len(columns)-3)
+		if barWidth >= 6 {
+			withBars := measure(layout.showUsed, barWidth)
+			if withBars.width() <= width {
+				layout = withBars
+			}
 		}
 	}
-	fmt.Fprintln(out, s.paint("\n* = active account", s.dim))
+	if width-layout.width() >= len(layout.widths)-1 {
+		layout.gap = 2
+	}
+	if len(columns) > 0 {
+		spare := width - layout.width()
+		for i := range columns {
+			add := spare / (len(columns) - i)
+			layout.widths[4+2*i] += add
+			spare -= add
+		}
+	}
+	return layout, true
+}
+
+func limitsComparisonCells(result app.UsageResult, columns []quotaColumn, layout limitsComparisonLayout, s limitsStyles) []cell {
+	name := cleanLimitText(result.Account.DisplayName)
+	if result.Info.IsActive {
+		name += " *"
+	}
+	plan := cleanLimitText(result.Usage.PlanType)
+	if plan == "" {
+		plan = "-"
+	}
+	row := []cell{{text: name, color: s.bold}, {text: cleanLimitText(formatUserShort(result.Info))}, {text: plan}, confidenceCell(result, s.red, s.yellow, s.green, s.dim)}
+	for _, column := range columns {
+		var quota *domain.UsageQuota
+		for i := range result.Usage.Quotas {
+			q := &result.Usage.Quotas[i]
+			if quotaKey(*q) == column.key && q.UsedPercent != nil {
+				quota = q
+				break
+			}
+		}
+		if quota == nil {
+			row = append(row, cell{text: "-", color: s.dim}, cell{text: "-", color: s.dim})
+			continue
+		}
+		used := *quota.UsedPercent
+		value := fmt.Sprintf("%.1f%% left", remainingQuota(used))
+		if layout.showUsed {
+			value += fmt.Sprintf(" %.1f%% used", used)
+		}
+		if layout.barWidth > 0 {
+			value = quotaBar(used, layout.barWidth) + " " + value
+		}
+		row = append(row, cell{text: value, color: percentColor(used, s.red, s.yellow, s.green)}, cell{text: formatResetAt(quota.ResetsAt), color: s.dim})
+	}
+	return row
+}
+
+func renderLimitsComparisonRow(cells []cell, widths []int, gap int, s limitsStyles) string {
+	var row strings.Builder
+	row.WriteString("  ")
+	for i, c := range cells {
+		row.WriteString(s.paint(c.text, c.color))
+		padding := max(0, widths[i]-displayWidth(c.text))
+		if i < len(cells)-1 {
+			padding += gap
+		}
+		row.WriteString(strings.Repeat(" ", padding))
+	}
+	return strings.TrimRight(row.String(), " ")
+}
+
+func printLimitsComparison(out io.Writer, results []app.UsageResult, columns []quotaColumn, s limitsStyles, layout limitsComparisonLayout) {
+	headers := make([]cell, len(layout.headers))
+	for i, header := range layout.headers {
+		headers[i] = cell{text: header}
+	}
+	fmt.Fprintln(out, s.paint(renderLimitsComparisonRow(headers, layout.widths, layout.gap, s), s.bold))
+	fmt.Fprintln(out, s.paint(strings.Repeat("-", layout.width()), s.dim))
+	for _, result := range results {
+		fmt.Fprintln(out, renderLimitsComparisonRow(limitsComparisonCells(result, columns, layout, s), layout.widths, layout.gap, s))
+	}
 }
 
 func remainingQuota(used float64) float64 {

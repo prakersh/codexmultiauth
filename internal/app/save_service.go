@@ -9,6 +9,7 @@ import (
 	"github.com/prakersh/codexmultiauth/internal/domain"
 	cmacrypto "github.com/prakersh/codexmultiauth/internal/infra/crypto"
 	"github.com/prakersh/codexmultiauth/internal/infra/store"
+	infrausage "github.com/prakersh/codexmultiauth/internal/infra/usage"
 )
 
 type SaveInput struct {
@@ -46,21 +47,39 @@ func (m *Manager) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 		defer cmacrypto.Zero(key)
 
 		aliases := uniqueStrings(input.Aliases)
+		matchingIndex := -1
 		for index, account := range state.Accounts {
 			if account.Fingerprint == record.Fingerprint {
-				updated := applySaveMetadata(account, record, input.DisplayName, aliases)
-				if accountsEqual(updated, account) {
-					result = SaveResult{Account: account, Deduplicated: true}
-					return nil
+				matchingIndex = index
+				break
+			}
+		}
+		// A shared workspace ID alone cannot establish which person signed in.
+		// Keep fingerprint-only deduplication for opaque legacy credentials.
+		metadata := infrausage.ExtractAccountMetadata(record.Parsed)
+		if matchingIndex == -1 && (metadata.UserID != "" || metadata.UserEmail != "") {
+			for index, account := range state.Accounts {
+				entry, ok := findVaultEntry(vault, account.ID)
+				if ok && sameCodexIdentity(record.Canonical, entry.Payload) {
+					matchingIndex = index
+					break
 				}
-				state.Accounts[index] = updated
-				vault = upsertVaultEntry(vault, updated.ID, record, m.now())
-				if err := m.commitStateAndVault(state, vault, key); err != nil {
-					return err
-				}
-				result = SaveResult{Account: updated, Updated: true}
+			}
+		}
+		if matchingIndex != -1 {
+			account := state.Accounts[matchingIndex]
+			updated := applySaveMetadata(account, record, input.DisplayName, aliases)
+			if accountsEqual(updated, account) {
+				result = SaveResult{Account: account, Deduplicated: true}
 				return nil
 			}
+			state.Accounts[matchingIndex] = updated
+			vault = upsertVaultEntry(vault, updated.ID, record, m.now())
+			if err := m.commitStateAndVault(state, vault, key); err != nil {
+				return err
+			}
+			result = SaveResult{Account: updated, Updated: true}
+			return nil
 		}
 
 		displayName := strings.TrimSpace(input.DisplayName)
